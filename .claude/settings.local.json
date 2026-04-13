@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(chmod +x run.sh)",
+      "Bash(pip3 install:*)",
+      "Bash(python3 -m venv .venv --clear)",
+      "Bash(.venv/bin/pip install:*)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(.venv/bin/python3 -c ':*)",
+      "Bash(chmod +x /Users/coopwire-test/remote-project/rag-website/deploy.sh /Users/coopwire-test/remote-project/rag-website/run.sh)",
+      "Bash(.venv/bin/python -c ':*)",
+      "Bash(.venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000)",
+      "Bash(curl -s http://localhost:8000/api/health)",
+      "Bash(python3 -m json.tool kill %1)",
+      "Bash(python3 -m json.tool)",
+      "Bash(curl -s http://localhost:8000/api/documents)",
+      "Bash(pkill -f \"uvicorn main:app\")",
+      "Bash(.venv/bin/python -c \"import chromadb; print\\(f'版本: {chromadb.__version__}'\\)\")",
+      "Read(//root/aiproject/**)"
+    ],
+    "additionalDirectories": [
+      "/Users/coopwire-test/remote-project/rag-website"
+    ]
+  }
+}
