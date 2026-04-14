@@ -8,6 +8,8 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import subprocess
+import sys
 from typing import AsyncGenerator
 
 import anthropic
@@ -255,23 +257,21 @@ async def upload_document(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail="上传的文件为空")
 
     try:
-        doc = ingest_document(file_bytes, filename, embed=False)  # 先只做分块，不向量化
+        doc = ingest_document(file_bytes, filename, embed=False)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"文件处理失败: {exc}") from exc
 
-    # 向量化：后台异步执行，不阻塞响应
-    async def _background_embed(doc_id: str) -> None:
-        loop = asyncio.get_event_loop()
-        try:
-            await loop.run_in_executor(None, re_embed_document, doc_id)
-            logger.info(f"[Upload] 后台向量化完成: {doc_id}")
-        except Exception as e:
-            logger.error(f"[Upload] 后台向量化失败: {doc_id} — {e}")
-
     if _embedding_available() and doc.chunk_count > 0:
-        asyncio.create_task(_background_embed(doc.doc_id))
+        # 用独立子进程做向量化，完全隔离于 uvicorn worker，不影响服务稳定性
+        subprocess.Popen(
+            [sys.executable, "-c",
+             f"from rag import re_embed_document; re_embed_document('{doc.doc_id}')"],
+            cwd=os.getcwd(),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
         embed_hint = f"（后台向量化中，共 {doc.chunk_count} 块，请稍候…）"
     else:
         embed_hint = "（TF-IDF 模式，未配置 Embedding API）"

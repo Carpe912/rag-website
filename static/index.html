@@ -1478,7 +1478,9 @@ function renderDocList() {
       <span class="doc-chunks">${doc.chunk_count}块</span>
       ${embBadge}
       ${reEmbBtn}
-      <button class="doc-delete" onclick="deleteDoc('${doc.doc_id}')" title="删除">
+      <button class="doc-delete" onclick="deleteDoc('${doc.doc_id}')"
+        title="${isEmbedding ? '向量化中，暂不可删除' : '删除'}"
+        ${isEmbedding ? 'disabled style="opacity:0.25;cursor:not-allowed;"' : ''}>
         <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
           <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
         </svg>
@@ -1527,6 +1529,7 @@ async function uploadFile(file) {
     showToast(`✓ "${file.name}" 导入成功，${data.chunk_count} 块，向量化进行中…`, 'success');
     // 加入后台向量化追踪，开始轮询
     state.embeddingDocs.add(data.doc_id);
+    saveEmbeddingDocs();
     await loadDocuments();
     startEmbedPolling();
   } catch (err) {
@@ -1538,6 +1541,10 @@ async function uploadFile(file) {
 }
 
 async function deleteDoc(docId) {
+  if (state.embeddingDocs.has(docId)) {
+    showToast('向量化进行中，请稍候再删除', 'error');
+    return;
+  }
   try {
     const resp = await fetch(`${API_BASE}/api/documents/${docId}`, {method: 'DELETE'});
     if (!resp.ok) throw new Error('删除失败');
@@ -1552,6 +1559,41 @@ async function deleteDoc(docId) {
 // ============================================================
 // 后台向量化轮询
 // ============================================================
+
+const EMBED_PENDING_KEY = 'qa-embedding-pending';
+const EMBED_MAX_AGE_MS  = 30 * 60 * 1000;  // 超过 30 分钟自动放弃
+
+function saveEmbeddingDocs() {
+  const now = Date.now();
+  // 读取已有记录，只追加/更新本次
+  let stored = {};
+  try { stored = JSON.parse(localStorage.getItem(EMBED_PENDING_KEY) || '{}'); } catch(e) {}
+  for (const id of state.embeddingDocs) {
+    if (!stored[id]) stored[id] = now;  // 记录首次加入时间
+  }
+  // 清理已不在 embeddingDocs 中的条目
+  for (const id of Object.keys(stored)) {
+    if (!state.embeddingDocs.has(id)) delete stored[id];
+  }
+  localStorage.setItem(EMBED_PENDING_KEY, JSON.stringify(stored));
+}
+
+function loadEmbeddingDocs() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(EMBED_PENDING_KEY) || '{}');
+    const now = Date.now();
+    let changed = false;
+    for (const [id, ts] of Object.entries(stored)) {
+      if (now - ts < EMBED_MAX_AGE_MS) {
+        state.embeddingDocs.add(id);
+      } else {
+        changed = true;  // 超时的条目，下面会被 saveEmbeddingDocs 清掉
+      }
+    }
+    if (changed) saveEmbeddingDocs();
+  } catch(e) {}
+}
+
 function startEmbedPolling() {
   if (state.embedPollTimer) return;  // 已在轮询中
   state.embedPollTimer = setInterval(async () => {
@@ -1564,6 +1606,7 @@ function startEmbedPolling() {
       for (const doc of docs) {
         if (state.embeddingDocs.has(doc.doc_id) && doc.has_embeddings) {
           state.embeddingDocs.delete(doc.doc_id);
+          saveEmbeddingDocs();
           showToast(`✅ "${doc.name}" 向量化完成，已切换为语义检索`, 'success', 4000);
           anyDone = true;
         }
@@ -1587,7 +1630,9 @@ function stopEmbedPolling() {
 // ============================================================
 function init() {
   loadChats();
+  loadEmbeddingDocs();              // 恢复刷新前的向量化状态
   loadDocuments();
+  if (state.embeddingDocs.size > 0) startEmbedPolling();  // 自动续上轮询
 
   // If there's a saved active chat, render it; otherwise show welcome
   if (state.activeChatId && state.chats.find(c => c.id === state.activeChatId)) {
