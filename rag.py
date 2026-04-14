@@ -53,7 +53,7 @@ EMBED_API_KEY  = os.getenv("EMBED_API_KEY", "")
 EMBED_BASE_URL = os.getenv("EMBED_BASE_URL", "")
 EMBED_MODEL    = os.getenv("EMBED_MODEL", "text-embedding-v3")
 EMBED_DIMS     = int(os.getenv("EMBED_DIMENSIONS", "1024"))
-EMBED_BATCH    = 16
+EMBED_BATCH    = 10  # DashScope text-embedding-v3 单批上限为 10
 
 CHROMA_COLLECTION = "rag_chunks"
 
