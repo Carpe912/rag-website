@@ -36,7 +36,9 @@ jobs:
 
             echo "===== [1/4] 拉取最新代码 ====="
             cd "$APP_DIR"
-            git pull origin master
+            # 保留 .env 和 data/ 等本地文件，强制同步远程代码
+            git fetch origin master
+            git reset --hard origin/master
 
             echo "===== [2/4] 安装/更新依赖 ====="
             .venv/bin/pip install -q --upgrade pip
