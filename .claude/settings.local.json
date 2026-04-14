@@ -16,7 +16,11 @@
       "Bash(curl -s http://localhost:8000/api/documents)",
       "Bash(pkill -f \"uvicorn main:app\")",
       "Bash(.venv/bin/python -c \"import chromadb; print\\(f'版本: {chromadb.__version__}'\\)\")",
-      "Read(//root/aiproject/**)"
+      "Read(//root/aiproject/**)",
+      "WebSearch",
+      "WebFetch(domain:qwenlm.github.io)",
+      "Read(//Users/moon/project/kbms/**)",
+      "WebFetch(domain:help.aliyun.com)"
     ],
     "additionalDirectories": [
       "/Users/coopwire-test/remote-project/rag-website"

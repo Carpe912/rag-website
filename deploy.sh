@@ -15,8 +15,17 @@ echo "================================================"
 
 # ── 1. 安装系统依赖 ──
 echo "📦 安装系统依赖..."
-apt-get update -qq
-apt-get install -y -qq python3 python3-pip python3-venv curl
+if command -v apt-get &>/dev/null; then
+    apt-get update -qq
+    apt-get install -y -qq python3 python3-pip python3-venv curl
+elif command -v dnf &>/dev/null; then
+    dnf install -y python3 python3-pip curl
+elif command -v yum &>/dev/null; then
+    yum install -y python3 python3-pip curl
+else
+    echo "❌ 未找到支持的包管理器（apt/dnf/yum），请手动安装 python3、pip、curl"
+    exit 1
+fi
 
 # ── 2. 创建应用目录并复制代码 ──
 echo "📁 准备应用目录: $APP_DIR"

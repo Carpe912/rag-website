@@ -360,7 +360,6 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
                 resp = client.embeddings.create(
                     model=EMBED_MODEL,
                     input=batch,
-                    dimensions=EMBED_DIMS,
                 )
                 sorted_data = sorted(resp.data, key=lambda x: x.index)
                 all_embeddings.extend([item.embedding for item in sorted_data])
