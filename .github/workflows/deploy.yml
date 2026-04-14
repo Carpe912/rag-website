@@ -37,7 +37,12 @@ jobs:
             echo "===== [1/4] 拉取最新代码 ====="
             cd "$APP_DIR"
             # 保留 .env 和 data/ 等本地文件，强制同步远程代码
-            git fetch origin master
+            # 国内服务器访问 GitHub 不稳定，最多重试 3 次
+            for i in 1 2 3; do
+              git fetch origin master && break
+              echo "git fetch 失败，第 $i 次重试（等待 10s）..."
+              sleep 10
+            done
             git reset --hard origin/master
 
             echo "===== [2/4] 安装/更新依赖 ====="
