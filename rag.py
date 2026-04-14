@@ -361,7 +361,8 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
         return []
     client = _get_openai_client()
     all_embeddings: list[list[float]] = []
-    for i in range(0, len(texts), EMBED_BATCH):
+    total_batches = (len(texts) + EMBED_BATCH - 1) // EMBED_BATCH
+    for batch_idx, i in enumerate(range(0, len(texts), EMBED_BATCH)):
         batch = texts[i: i + EMBED_BATCH]
         retry = 0
         while retry < 3:
@@ -378,6 +379,10 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
                 if retry >= 3:
                     raise RuntimeError(f"Embedding API 调用失败（已重试3次）: {e}") from e
                 time.sleep(1.0 * retry)
+        # 批次间限速：每 10 批暂停一次，避免触发 DashScope QPS 限流
+        if (batch_idx + 1) % 10 == 0:
+            logger.info(f"[Embed] 进度 {batch_idx + 1}/{total_batches} 批")
+            time.sleep(0.5)
     return all_embeddings
 
 
@@ -511,9 +516,10 @@ def _split_into_chunks(
 # Ingestion
 # ---------------------------------------------------------------------------
 
-def ingest_document(file_bytes: bytes, filename: str) -> Document:
+def ingest_document(file_bytes: bytes, filename: str, embed: bool = True) -> Document:
     """
     解析 → 分块 → 向量化 → 写入 Chroma（或 JSON 降级） → 持久化元数据
+    embed=False 时只做分块和持久化，跳过向量化（供后台异步调用）。
     """
     text = extract_text(file_bytes, filename)
     raw_chunks = _split_into_chunks(text)
@@ -534,7 +540,7 @@ def ingest_document(file_bytes: bytes, filename: str) -> Document:
 
     has_embeddings = False
 
-    if _embedding_available() and chunks:
+    if embed and _embedding_available() and chunks:
         try:
             logger.info(f"[RAG] 向量化 {len(chunks)} 块（{filename}）…")
             texts = [c.text for c in chunks]

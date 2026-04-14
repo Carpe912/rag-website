@@ -5,6 +5,7 @@ FastAPI + Anthropic Claude API（自定义代理） + Embedding RAG
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from typing import AsyncGenerator
@@ -232,6 +233,7 @@ async def upload_document(file: UploadFile = File(...)):
     """
     上传 .txt、.md、.pdf、.xlsx 或 .xls 文件。
     自动分块并存入知识库，用于 RAG 检索。
+    大文件（chunk 数 > 200）向量化在后台异步进行，上传立即返回。
     """
     filename = file.filename or "unknown"
     ext = "." + filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
@@ -253,13 +255,27 @@ async def upload_document(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail="上传的文件为空")
 
     try:
-        doc = ingest_document(file_bytes, filename)
+        doc = ingest_document(file_bytes, filename, embed=False)  # 先只做分块，不向量化
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"文件处理失败: {exc}") from exc
 
-    embed_hint = "（已向量化）" if doc.has_embeddings else "（TF-IDF 模式，未向量化）"
+    # 向量化：后台异步执行，不阻塞响应
+    async def _background_embed(doc_id: str) -> None:
+        loop = asyncio.get_event_loop()
+        try:
+            await loop.run_in_executor(None, re_embed_document, doc_id)
+            logger.info(f"[Upload] 后台向量化完成: {doc_id}")
+        except Exception as e:
+            logger.error(f"[Upload] 后台向量化失败: {doc_id} — {e}")
+
+    if _embedding_available() and doc.chunk_count > 0:
+        asyncio.create_task(_background_embed(doc.doc_id))
+        embed_hint = f"（后台向量化中，共 {doc.chunk_count} 块，请稍候…）"
+    else:
+        embed_hint = "（TF-IDF 模式，未配置 Embedding API）"
+
     return {
         "doc_id": doc.doc_id,
         "name": doc.name,
