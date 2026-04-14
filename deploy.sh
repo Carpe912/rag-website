@@ -27,17 +27,94 @@ else
     exit 1
 fi
 
-# ── 2. 创建应用目录并复制代码 ──
+# ── 2. 确保在应用目录中 ──
 echo "📁 准备应用目录: $APP_DIR"
 mkdir -p "$APP_DIR"
-cp -r . "$APP_DIR/"
+# 若脚本已在目标目录内运行（如直接 git clone 到服务器），跳过复制
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ "$SCRIPT_DIR" != "$APP_DIR" ]; then
+    cp -r . "$APP_DIR/"
+fi
 cd "$APP_DIR"
 
 # ── 3. 创建虚拟环境并安装依赖 ──
 echo "🐍 安装 Python 依赖..."
+
+# 检查 Python 版本（需要 >= 3.8）
+PY_VER=$(python3 -c "import sys; print(sys.version_info.minor)" 2>/dev/null || echo "0")
+PY_MAJOR=$(python3 -c "import sys; print(sys.version_info.major)" 2>/dev/null || echo "0")
+if [ "$PY_MAJOR" -lt 3 ] || { [ "$PY_MAJOR" -eq 3 ] && [ "$PY_VER" -lt 8 ]; }; then
+    echo "❌ Python 版本过低（当前 $(python3 --version 2>&1)），需要 Python 3.8+，请先升级"
+    echo "   CentOS/AlmaLinux 参考：dnf install python3.11 -y"
+    exit 1
+fi
+echo "✅ Python 版本：$(python3 --version)"
+
+# 国内镜像安装（阿里云 → 清华 兜底）
+PIP_MIRRORS=(
+    "https://mirrors.aliyun.com/pypi/simple/"
+    "https://pypi.tuna.tsinghua.edu.cn/simple/"
+    "https://pypi.mirrors.ustc.edu.cn/simple/"
+)
+
 python3 -m venv .venv
-.venv/bin/pip install --upgrade pip -q
-.venv/bin/pip install -r requirements.txt -q
+
+echo "  升级 pip..."
+for mirror in "${PIP_MIRRORS[@]}"; do
+    if .venv/bin/pip install --upgrade pip \
+        -i "$mirror" \
+        --trusted-host "$(echo $mirror | awk -F/ '{print $3}')" \
+        -q 2>/dev/null; then
+        echo "  ✅ pip 升级成功（$mirror）"
+        break
+    fi
+done
+
+echo "  安装项目依赖..."
+for mirror in "${PIP_MIRRORS[@]}"; do
+    if .venv/bin/pip install -r requirements.txt \
+        -i "$mirror" \
+        --trusted-host "$(echo $mirror | awk -F/ '{print $3}')" \
+        -q 2>/dev/null; then
+        echo "  ✅ 依赖安装成功（$mirror）"
+        break
+    fi
+    echo "  ⚠️  镜像 $mirror 失败，尝试下一个..."
+done
+
+# 验证关键包
+echo "  验证关键包..."
+for pkg in anthropic fastapi openai sklearn; do
+    if .venv/bin/python -c "import $pkg" 2>/dev/null; then
+        echo "  ✅ $pkg"
+    else
+        echo "  ❌ $pkg 导入失败："
+        .venv/bin/python -c "import $pkg"
+    fi
+done
+
+# chromadb 单独验证（需先打 pysqlite3 patch）
+if .venv/bin/python - 2>/dev/null <<'PYEOF'
+try:
+    import pysqlite3, sys
+    sys.modules["sqlite3"] = pysqlite3
+except ImportError:
+    pass
+import chromadb
+PYEOF
+then
+    echo "  ✅ chromadb"
+else
+    echo "  ❌ chromadb 导入失败："
+    .venv/bin/python - <<'PYEOF'
+try:
+    import pysqlite3, sys
+    sys.modules["sqlite3"] = pysqlite3
+except ImportError:
+    pass
+import chromadb
+PYEOF
+fi
 
 # ── 4. 确保 .env 存在 ──
 if [ ! -f "$APP_DIR/.env" ]; then

@@ -13,6 +13,15 @@ RAG Engine — Retrieval-Augmented Generation
 
 from __future__ import annotations
 
+# chromadb 要求 sqlite3 >= 3.35.0，旧系统（CentOS 等）自带版本不够。
+# pysqlite3-binary 内置了新版 sqlite3，下面把标准库的 sqlite3 替换掉。
+try:
+    import pysqlite3 as _pysqlite3
+    import sys as _sys
+    _sys.modules["sqlite3"] = _pysqlite3
+except ImportError:
+    pass  # 本地开发环境 sqlite3 够新，无需替换
+
 import json
 import logging
 import os
