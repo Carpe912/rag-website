@@ -298,7 +298,7 @@ async def remove_document(doc_id: str):
 @app.post("/api/documents/{doc_id}/re-embed")
 async def reembed_document(doc_id: str):
     """
-    对已导入的文档重新生成向量索引。
+    对已导入的文档重新生成向量索引（子进程后台执行，立即返回）。
     适用场景：初次导入时 Embedding API 不可用，之后补做向量化。
     """
     if not _embedding_available():
@@ -306,10 +306,21 @@ async def reembed_document(doc_id: str):
             status_code=503,
             detail="Embedding API 未配置，请检查 EMBED_API_KEY 和 EMBED_BASE_URL。",
         )
-    success = re_embed_document(doc_id)
-    if not success:
-        raise HTTPException(status_code=404, detail="文档不存在或向量化失败，请查看服务日志。")
-    return {"message": "向量化完成", "doc_id": doc_id}
+    # 确认文档存在
+    docs = get_document_list()
+    target = next((d for d in docs if d["doc_id"] == doc_id), None)
+    if not target:
+        raise HTTPException(status_code=404, detail="文档不存在。")
+
+    # 子进程后台执行，不阻塞服务
+    subprocess.Popen(
+        [sys.executable, "-c",
+         f"from rag import re_embed_document; re_embed_document('{doc_id}')"],
+        cwd=os.getcwd(),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    return {"message": f"向量化已在后台启动，共 {target['chunk_count']} 块，请稍候查看状态。", "doc_id": doc_id}
 
 
 # ---------------------------------------------------------------------------
