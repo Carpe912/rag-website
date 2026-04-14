@@ -417,7 +417,8 @@ def extract_text(file_bytes: bytes, filename: str) -> str:
                     cells = [str(c) if c is not None else "" for c in row]
                     if any(c.strip() for c in cells):
                         parts.append("\t".join(cells))
-            return "\n".join(parts)
+            # 用双换行连接，使分块算法能按行切割（单换行会导致整表被视为一个巨型段落）
+            return "\n\n".join(parts)
         except Exception:
             # openpyxl 无法解析旧格式 .xls，降级用 xlrd
             try:
@@ -431,7 +432,8 @@ def extract_text(file_bytes: bytes, filename: str) -> str:
                         cells = [str(sheet.cell_value(row_idx, col)) for col in range(sheet.ncols)]
                         if any(c.strip() for c in cells):
                             parts.append("\t".join(cells))
-                return "\n".join(parts)
+                # 用双换行连接，使分块算法能按行切割
+                return "\n\n".join(parts)
             except Exception as exc:
                 raise ValueError(f"Excel 解析失败: {exc}") from exc
     else:
