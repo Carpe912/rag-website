@@ -20,7 +20,8 @@
       "WebSearch",
       "WebFetch(domain:qwenlm.github.io)",
       "Read(//Users/moon/project/kbms/**)",
-      "WebFetch(domain:help.aliyun.com)"
+      "WebFetch(domain:help.aliyun.com)",
+      "WebFetch(domain:sunlingyue.cn)"
     ],
     "additionalDirectories": [
       "/Users/coopwire-test/remote-project/rag-website"

@@ -466,13 +466,18 @@ body {
 
 /* Code blocks */
 .bubble-content pre {
+  margin: 0;
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+  overflow: hidden;
+}
+
+.code-block-wrapper {
+  position: relative;
   margin: 0.7em 0;
   border-radius: var(--radius-sm);
   overflow: hidden;
   border: 1px solid rgba(255,255,255,0.1);
 }
-
-.code-block-wrapper { position: relative; }
 
 .code-header {
   display: flex;
@@ -898,7 +903,7 @@ renderer.code = function(code, lang) {
     ? hljs.highlight(code, {language: lang, ignoreIllegals: true}).value
     : hljs ? hljs.highlightAuto(code).value : safeCode;
 
-  return `<div class="code-block-wrapper"><pre><div class="code-header"><span>${langLabel}</span><button class="code-copy-btn" onclick="copyCode(this)">Copy</button></div><code class="hljs language-${langLabel}">${highlighted}</code></pre></div>`;
+  return `<div class="code-block-wrapper"><div class="code-header"><span>${langLabel}</span><button class="code-copy-btn" onclick="copyCode(this)">Copy</button></div><pre><code class="hljs language-${langLabel}">${highlighted}</code></pre></div>`;
 };
 marked.use({ renderer });
 
@@ -1062,6 +1067,8 @@ function renderMessages() {
   const chat = getActiveChat();
 
   if (!chat || chat.messages.length === 0) {
+    // Detach welcome before clearing, then re-attach
+    if (welcome.parentNode === inner) inner.removeChild(welcome);
     inner.innerHTML = '';
     inner.appendChild(welcome);
     welcome.style.display = 'flex';
@@ -1069,6 +1076,7 @@ function renderMessages() {
   }
 
   welcome.style.display = 'none';
+  if (welcome.parentNode === inner) inner.removeChild(welcome);
   inner.innerHTML = '';
 
   for (const msg of chat.messages) {
@@ -1129,7 +1137,7 @@ function scrollToBottom(smooth = true) {
 // Copy helpers
 // ============================================================
 function copyCode(btn) {
-  const code = btn.closest('pre').querySelector('code');
+  const code = btn.closest('.code-block-wrapper').querySelector('code');
   navigator.clipboard.writeText(code.textContent).then(() => {
     btn.textContent = 'Copied!';
     btn.classList.add('copied');
@@ -1143,9 +1151,10 @@ function copyMessage(btn, msgId) {
   const msg = chat.messages.find(m => m.id === msgId);
   if (!msg) return;
   navigator.clipboard.writeText(msg.content).then(() => {
+    const originalHTML = btn.innerHTML;
     btn.textContent = '✓ Copied';
     btn.classList.add('copied');
-    setTimeout(() => { btn.innerHTML = `<svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy`; btn.classList.remove('copied'); }, 2000);
+    setTimeout(() => { btn.innerHTML = originalHTML; btn.classList.remove('copied'); }, 2000);
   });
 }
 
@@ -1471,9 +1480,11 @@ function init() {
     renderSidebar();
     // Show welcome
     const inner = document.getElementById('messages-inner');
+    const welcome = document.getElementById('welcome-screen');
+    if (welcome.parentNode === inner) inner.removeChild(welcome);
     inner.innerHTML = '';
-    inner.appendChild(document.getElementById('welcome-screen'));
-    document.getElementById('welcome-screen').style.display = 'flex';
+    inner.appendChild(welcome);
+    welcome.style.display = 'flex';
   }
 
   // New chat button
@@ -1490,7 +1501,7 @@ function init() {
     updateSendButton(state.isStreaming);
   });
   input.addEventListener('keydown', e => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
       if (!state.isStreaming) sendMessage();
     }
@@ -1522,7 +1533,10 @@ function init() {
 
   // Close sidebar on main click (mobile)
   document.querySelector('.main').addEventListener('click', () => {
-    document.getElementById('sidebar').classList.remove('open');
+    const sidebar = document.getElementById('sidebar');
+    if (sidebar.classList.contains('open')) {
+      sidebar.classList.remove('open');
+    }
   });
 
   // Drag and drop
