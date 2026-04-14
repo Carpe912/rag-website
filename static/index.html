@@ -1572,7 +1572,7 @@ function startEmbedPolling() {
       renderDocList();
       if (state.embeddingDocs.size === 0) stopEmbedPolling();
     } catch (e) { /* 网络波动忽略 */ }
-  }, 3000);
+  }, 12000);
 }
 
 function stopEmbedPolling() {
