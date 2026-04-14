@@ -239,8 +239,11 @@ body {
   font-size: 9px; font-weight: 700; padding: 1px 4px; border-radius: 3px;
   flex-shrink: 0;
 }
-.doc-emb-badge.ok  { background: rgba(34,197,94,0.15); color: var(--success); }
-.doc-emb-badge.no  { background: rgba(245,158,11,0.15); color: var(--warning); }
+.doc-emb-badge.ok      { background: rgba(34,197,94,0.15); color: var(--success); }
+.doc-emb-badge.no      { background: rgba(245,158,11,0.15); color: var(--warning); }
+.doc-emb-badge.loading { background: rgba(99,102,241,0.15); color: var(--accent);
+                         animation: embedPulse 1.2s ease-in-out infinite; }
+@keyframes embedPulse { 0%,100% { opacity:1; } 50% { opacity:0.35; } }
 .doc-re-embed {
   background: none; border: none;
   color: var(--text-muted);
@@ -913,6 +916,8 @@ const state = {
   isStreaming: false,
   documents: [],      // from server
   abortController: null,
+  embeddingDocs: new Set(),  // doc_ids 正在后台向量化
+  embedPollTimer: null,      // 轮询定时器
 };
 
 // ============================================================
@@ -1453,10 +1458,13 @@ function renderDocList() {
 
   const icons = {pdf: '📄', txt: '📝', md: '📋', xlsx: '📊', xls: '📊'};
   list.innerHTML = state.documents.map(doc => {
-    const embBadge = doc.has_embeddings
-      ? `<span class="doc-emb-badge ok" title="已向量化">向量</span>`
-      : `<span class="doc-emb-badge no" title="TF-IDF 模式，点击重新向量化">TF-IDF</span>`;
-    const reEmbBtn = !doc.has_embeddings ? `
+    const isEmbedding = state.embeddingDocs.has(doc.doc_id);
+    const embBadge = isEmbedding
+      ? `<span class="doc-emb-badge loading" title="向量化中，请稍候…">向量化中…</span>`
+      : doc.has_embeddings
+        ? `<span class="doc-emb-badge ok" title="已向量化">向量</span>`
+        : `<span class="doc-emb-badge no" title="TF-IDF 模式，点击重新向量化">TF-IDF</span>`;
+    const reEmbBtn = (!doc.has_embeddings && !isEmbedding) ? `
       <button class="doc-re-embed" onclick="reEmbedDoc('${doc.doc_id}', this)" title="重新向量化">
         <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
           <polyline points="1 4 1 10 7 10"/>
@@ -1516,9 +1524,11 @@ async function uploadFile(file) {
     const resp = await fetch(`${API_BASE}/api/documents/upload`, {method: 'POST', body: form});
     const data = await resp.json();
     if (!resp.ok) throw new Error(data.detail || '上传失败');
-    const embHint = data.has_embeddings ? '（已向量化）' : '（TF-IDF 模式）';
-    showToast(`✓ "${file.name}" 导入成功，${data.chunk_count} 块 ${embHint}`, 'success');
+    showToast(`✓ "${file.name}" 导入成功，${data.chunk_count} 块，向量化进行中…`, 'success');
+    // 加入后台向量化追踪，开始轮询
+    state.embeddingDocs.add(data.doc_id);
     await loadDocuments();
+    startEmbedPolling();
   } catch (err) {
     showToast(err.message, 'error', 5000);
   } finally {
@@ -1532,9 +1542,43 @@ async function deleteDoc(docId) {
     const resp = await fetch(`${API_BASE}/api/documents/${docId}`, {method: 'DELETE'});
     if (!resp.ok) throw new Error('删除失败');
     showToast('文档已删除', 'info');
+    state.embeddingDocs.delete(docId);  // 删除时同时移出轮询
     await loadDocuments();
   } catch (err) {
     showToast(err.message, 'error');
+  }
+}
+
+// ============================================================
+// 后台向量化轮询
+// ============================================================
+function startEmbedPolling() {
+  if (state.embedPollTimer) return;  // 已在轮询中
+  state.embedPollTimer = setInterval(async () => {
+    if (state.embeddingDocs.size === 0) { stopEmbedPolling(); return; }
+    try {
+      const resp = await fetch(`${API_BASE}/api/documents`);
+      if (!resp.ok) return;
+      const docs = (await resp.json()).documents || [];
+      let anyDone = false;
+      for (const doc of docs) {
+        if (state.embeddingDocs.has(doc.doc_id) && doc.has_embeddings) {
+          state.embeddingDocs.delete(doc.doc_id);
+          showToast(`✅ "${doc.name}" 向量化完成，已切换为语义检索`, 'success', 4000);
+          anyDone = true;
+        }
+      }
+      state.documents = docs;
+      renderDocList();
+      if (state.embeddingDocs.size === 0) stopEmbedPolling();
+    } catch (e) { /* 网络波动忽略 */ }
+  }, 3000);
+}
+
+function stopEmbedPolling() {
+  if (state.embedPollTimer) {
+    clearInterval(state.embedPollTimer);
+    state.embedPollTimer = null;
   }
 }
 
