@@ -1090,23 +1090,27 @@ function renderSidebar() {
 // ============================================================
 function renderMessages() {
   const inner = document.getElementById('messages-inner');
-  const welcome = document.getElementById('welcome-screen');
   const chat = getActiveChat();
 
-  if (!chat || chat.messages.length === 0) {
-    // Detach welcome before clearing, then re-attach
-    if (welcome.parentNode === inner) inner.removeChild(welcome);
+  // 始终通过 getElementById 获取 welcome，避免引用断裂
+  const showWelcome = () => {
     inner.innerHTML = '';
-    inner.appendChild(welcome);
-    welcome.style.display = 'flex';
+    const w = document.getElementById('welcome-screen');
+    if (w) { inner.appendChild(w); w.style.display = 'flex'; }
+  };
+
+  if (!chat || chat.messages.length === 0) {
+    showWelcome();
     return;
   }
 
-  welcome.style.display = 'none';
-  if (welcome.parentNode === inner) inner.removeChild(welcome);
+  const w = document.getElementById('welcome-screen');
+  if (w) w.style.display = 'none';
   inner.innerHTML = '';
 
   for (const msg of chat.messages) {
+    // 跳过流式过程中 content 为空的 assistant 占位（还在流式中，不需要渲染）
+    if (msg.role === 'assistant' && !msg.content) continue;
     inner.appendChild(buildMessageEl(msg));
   }
 
@@ -1528,11 +1532,9 @@ function init() {
     renderSidebar();
     // Show welcome
     const inner = document.getElementById('messages-inner');
-    const welcome = document.getElementById('welcome-screen');
-    if (welcome.parentNode === inner) inner.removeChild(welcome);
     inner.innerHTML = '';
-    inner.appendChild(welcome);
-    welcome.style.display = 'flex';
+    const welcome = document.getElementById('welcome-screen');
+    if (welcome) { inner.appendChild(welcome); welcome.style.display = 'flex'; }
   }
 
   // New chat button
@@ -1567,7 +1569,8 @@ function init() {
   });
 
   // File upload
-  document.getElementById('btn-upload-trigger').onclick = () => {
+  document.getElementById('btn-upload-trigger').onclick = (e) => {
+    e.stopPropagation();  // 阻止冒泡到 .main，避免 file dialog 被打断
     document.getElementById('file-input').click();
   };
   document.getElementById('file-input').onchange = e => {
