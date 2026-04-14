@@ -21,7 +21,12 @@
       "WebFetch(domain:qwenlm.github.io)",
       "Read(//Users/moon/project/kbms/**)",
       "WebFetch(domain:help.aliyun.com)",
-      "WebFetch(domain:sunlingyue.cn)"
+      "WebFetch(domain:sunlingyue.cn)",
+      "Bash(git config:*)",
+      "Bash(curl -v --max-time 10 https://github.com)",
+      "Read(//Users/coopwire-test/.ssh/**)",
+      "Bash(git remote:*)",
+      "Bash(ssh -T git@github.com)"
     ],
     "additionalDirectories": [
       "/Users/coopwire-test/remote-project/rag-website"
