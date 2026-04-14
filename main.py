@@ -230,7 +230,7 @@ async def list_documents():
 @app.post("/api/documents/upload")
 async def upload_document(file: UploadFile = File(...)):
     """
-    上传 .txt、.md 或 .pdf 文件。
+    上传 .txt、.md、.pdf、.xlsx 或 .xls 文件。
     自动分块并存入知识库，用于 RAG 检索。
     """
     filename = file.filename or "unknown"
