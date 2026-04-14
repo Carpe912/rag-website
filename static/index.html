@@ -833,7 +833,7 @@ textarea#chat-input::placeholder { color: var(--text-muted); }
         </svg>
         添加文档
       </button>
-      <input type="file" id="file-input" accept=".txt,.md,.pdf" style="display:none" />
+      <input type="file" id="file-input" accept=".txt,.md,.pdf,.xlsx,.xls" style="display:none" />
     </div>
 
     <div id="upload-progress" class="upload-progress">⏳ 正在处理…</div>
@@ -1425,7 +1425,7 @@ function renderDocList() {
     return;
   }
 
-  const icons = {pdf: '📄', txt: '📝', md: '📋'};
+  const icons = {pdf: '📄', txt: '📝', md: '📋', xlsx: '📊', xls: '📊'};
   list.innerHTML = state.documents.map(doc => {
     const embBadge = doc.has_embeddings
       ? `<span class="doc-emb-badge ok" title="已向量化">向量</span>`
@@ -1472,10 +1472,10 @@ async function reEmbedDoc(docId, btn) {
 async function uploadFile(file) {
   if (!file) return;
 
-  const allowed = ['.txt', '.md', '.pdf'];
+  const allowed = ['.txt', '.md', '.pdf', '.xlsx', '.xls'];
   const ext = '.' + file.name.split('.').pop().toLowerCase();
   if (!allowed.includes(ext)) {
-    showToast(`不支持的文件格式: ${ext}，请使用 .txt、.md 或 .pdf`, 'error');
+    showToast(`不支持的文件格式: ${ext}，请使用 .txt、.md、.pdf、.xlsx 或 .xls`, 'error');
     return;
   }
 

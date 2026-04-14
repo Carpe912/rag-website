@@ -94,7 +94,7 @@ MODEL = os.getenv("CLAUDE_MODEL", "claude-opus-4-6")
 MAX_TOKENS = 8000
 
 # Allowed upload types
-ALLOWED_EXTENSIONS = {".txt", ".md", ".pdf"}
+ALLOWED_EXTENSIONS = {".txt", ".md", ".pdf", ".xlsx", ".xls"}
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20 MB
 
 

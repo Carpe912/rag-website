@@ -404,6 +404,36 @@ def extract_text(file_bytes: bytes, filename: str) -> str:
             return "\n".join(page.get_text() for page in doc)
         except Exception as exc:
             raise ValueError(f"PDF 解析失败: {exc}") from exc
+    elif ext in ("xlsx", "xls"):
+        try:
+            import io
+            import openpyxl
+            wb = openpyxl.load_workbook(io.BytesIO(file_bytes), read_only=True, data_only=True)
+            parts: list[str] = []
+            for sheet in wb.worksheets:
+                parts.append(f"【Sheet: {sheet.title}】")
+                for row in sheet.iter_rows(values_only=True):
+                    # 过滤空行，把每格转为字符串后用制表符拼接
+                    cells = [str(c) if c is not None else "" for c in row]
+                    if any(c.strip() for c in cells):
+                        parts.append("\t".join(cells))
+            return "\n".join(parts)
+        except Exception:
+            # openpyxl 无法解析旧格式 .xls，降级用 xlrd
+            try:
+                import io
+                import xlrd
+                wb = xlrd.open_workbook(file_contents=file_bytes)
+                parts = []
+                for sheet in wb.sheets():
+                    parts.append(f"【Sheet: {sheet.name}】")
+                    for row_idx in range(sheet.nrows):
+                        cells = [str(sheet.cell_value(row_idx, col)) for col in range(sheet.ncols)]
+                        if any(c.strip() for c in cells):
+                            parts.append("\t".join(cells))
+                return "\n".join(parts)
+            except Exception as exc:
+                raise ValueError(f"Excel 解析失败: {exc}") from exc
     else:
         raise ValueError(f"不支持的文件类型: .{ext}")
 
