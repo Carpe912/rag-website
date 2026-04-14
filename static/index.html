@@ -1602,13 +1602,20 @@ function startEmbedPolling() {
       const resp = await fetch(`${API_BASE}/api/documents`);
       if (!resp.ok) return;
       const docs = (await resp.json()).documents || [];
-      let anyDone = false;
+      const serverDocIds = new Set(docs.map(d => d.doc_id));
+
       for (const doc of docs) {
         if (state.embeddingDocs.has(doc.doc_id) && doc.has_embeddings) {
           state.embeddingDocs.delete(doc.doc_id);
           saveEmbeddingDocs();
           showToast(`✅ "${doc.name}" 向量化完成，已切换为语义检索`, 'success', 4000);
-          anyDone = true;
+        }
+      }
+      // 文档已被删除的 doc_id 也停止追踪
+      for (const pendingId of state.embeddingDocs) {
+        if (!serverDocIds.has(pendingId)) {
+          state.embeddingDocs.delete(pendingId);
+          saveEmbeddingDocs();
         }
       }
       state.documents = docs;
