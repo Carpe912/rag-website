@@ -52,10 +52,10 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # Anthropic client — 支持自定义代理地址和 token
-_anthropic_client: anthropic.Anthropic | None = None
+_anthropic_client: anthropic.AsyncAnthropic | None = None
 
 
-def get_client() -> anthropic.Anthropic:
+def get_client() -> anthropic.AsyncAnthropic:
     global _anthropic_client
     if _anthropic_client is None:
         # 优先使用 ANTHROPIC_AUTH_TOKEN（自定义代理），其次用标准 ANTHROPIC_API_KEY
@@ -72,7 +72,7 @@ def get_client() -> anthropic.Anthropic:
         if base_url:
             kwargs["base_url"] = base_url
 
-        _anthropic_client = anthropic.Anthropic(**kwargs)
+        _anthropic_client = anthropic.AsyncAnthropic(**kwargs)
     return _anthropic_client
 
 
@@ -158,13 +158,13 @@ async def chat(request: ChatRequest):
     async def event_stream() -> AsyncGenerator[str, None]:
         """生成 SSE 格式的文本增量流。"""
         try:
-            with client.messages.stream(
+            async with client.messages.stream(
                 model=MODEL,
                 max_tokens=MAX_TOKENS,
                 system=system_prompt,
                 messages=api_messages,
             ) as stream:
-                for event in stream:
+                async for event in stream:
                     if event.type == "content_block_delta":
                         if event.delta.type == "text_delta":
                             payload = json.dumps(
@@ -174,7 +174,7 @@ async def chat(request: ChatRequest):
                             yield f"data: {payload}\n\n"
 
                 # 发送完成信号
-                final = stream.get_final_message()
+                final = await stream.get_final_message()
                 done_payload = json.dumps({
                     "type": "done",
                     "input_tokens": final.usage.input_tokens,
