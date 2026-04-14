@@ -521,16 +521,16 @@ body {
 /* Streaming cursor */
 .cursor {
   display: inline-block;
-  width: 2px; height: 14px;
-  background: var(--text-primary);
-  margin-left: 1px;
-  vertical-align: middle;
+  width: 2px; height: 1em;
+  background: var(--accent);
+  margin-left: 2px;
+  vertical-align: text-bottom;
   border-radius: 1px;
-  animation: blink 1s step-end infinite;
+  animation: blink 0.9s ease-in-out infinite;
 }
 @keyframes blink {
-  0%, 100% { opacity: 1; }
-  50%       { opacity: 0; }
+  0%, 45% { opacity: 1; }
+  55%, 100% { opacity: 0; }
 }
 
 /* Thinking indicator */
@@ -1273,8 +1273,7 @@ async function sendMessage(e, forcedContent = null) {
   let fullText = '';
   let firstToken = true;  // 收到第一个 token 后移除 thinking，切换为流式模式
 
-  // 流式文本节点：用 <pre> 追加纯文本，最后再做 markdown 渲染
-  // 这样避免 markdown 未闭合时中间状态的渲染错误
+  // 流式文本节点：纯文本追加 + 打字机动画，最后再做 markdown 渲染
   const streamingPre = document.createElement('div');
   streamingPre.className = 'streaming-text';
   streamingPre.style.cssText = 'white-space: pre-wrap; word-break: break-word; font-size:14px; line-height:1.65;';
@@ -1282,16 +1281,28 @@ async function sendMessage(e, forcedContent = null) {
   const cursor = document.createElement('span');
   cursor.className = 'cursor';
 
-  let renderTimer = null;
+  // 打字机：displayedLen 追赶 fullText.length，速度自适应
+  let displayedLen = 0;
+  let rafHandle = null;
+
+  function typewriterTick() {
+    rafHandle = null;
+    if (displayedLen >= fullText.length) return;
+    const behind = fullText.length - displayedLen;
+    // 离得越远追得越快，近处放慢给打字机感
+    const speed = behind > 80 ? 10 : behind > 20 ? 5 : 2;
+    displayedLen = Math.min(displayedLen + speed, fullText.length);
+    streamingPre.textContent = fullText.slice(0, displayedLen);
+    streamingPre.appendChild(cursor);
+    scrollToBottom();
+    if (displayedLen < fullText.length) {
+      rafHandle = requestAnimationFrame(typewriterTick);
+    }
+  }
+
   function scheduleRender() {
-    if (renderTimer) return;
-    renderTimer = requestAnimationFrame(() => {
-      renderTimer = null;
-      // 流式阶段：纯文本追加，光标跟随
-      streamingPre.textContent = fullText;
-      streamingPre.appendChild(cursor);
-      scrollToBottom();
-    });
+    if (rafHandle) return;
+    rafHandle = requestAnimationFrame(typewriterTick);
   }
 
   try {
@@ -1344,19 +1355,27 @@ async function sendMessage(e, forcedContent = null) {
       }
     }
 
-    // 流结束：用 marked 完整渲染 markdown，替换掉流式纯文本节点
+    // 流结束：立即刷新剩余字符，再用 marked 完整渲染 markdown
+    if (rafHandle) { cancelAnimationFrame(rafHandle); rafHandle = null; }
     cursor.remove();
     streamingPre.remove();
+    bubbleContent.style.opacity = '0';
     bubbleContent.innerHTML = marked.parse(fullText || '（无响应）');
+    bubbleContent.style.transition = 'opacity 0.25s ease';
+    requestAnimationFrame(() => { bubbleContent.style.opacity = '1'; });
     assistantMsg.content = fullText;
 
   } catch (err) {
+    if (rafHandle) { cancelAnimationFrame(rafHandle); rafHandle = null; }
     cursor.remove();
     thinkingEl.remove();
     if (err.name === 'AbortError') {
       // 用户手动停止：保留已接收内容并做 markdown 渲染
       streamingPre.remove();
+      bubbleContent.style.opacity = '0';
       bubbleContent.innerHTML = marked.parse(fullText || '');
+      bubbleContent.style.transition = 'opacity 0.25s ease';
+      requestAnimationFrame(() => { bubbleContent.style.opacity = '1'; });
       assistantMsg.content = fullText;
     } else {
       streamingPre.remove();
