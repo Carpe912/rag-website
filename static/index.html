@@ -297,6 +297,7 @@ body {
   overflow-y: auto;
   padding: 0;
   scroll-behavior: smooth;
+  position: relative;
 }
 
 .messages-inner {
@@ -310,14 +311,16 @@ body {
 
 /* Welcome screen */
 .welcome {
+  position: absolute;
+  inset: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-height: 60vh;
   text-align: center;
   gap: 16px;
   padding: 32px 16px;
+  pointer-events: auto;
 }
 .welcome-icon {
   width: 56px; height: 56px;
@@ -849,18 +852,18 @@ textarea#chat-input::placeholder { color: var(--text-muted); }
 <!-- ===== MAIN ===== -->
 <main class="main">
   <div class="messages-container" id="messages-container">
-    <div class="messages-inner" id="messages-inner">
-      <!-- Welcome screen -->
-      <div class="welcome" id="welcome-screen">
-        <div class="welcome-icon">✨</div>
-        <h1>有什么可以帮助你的？</h1>
-        <p>随时提问，支持编程、知识、分析等各类问题。上传文档后可开启内部知识库检索，回答更精准。</p>
-        <div class="suggestion-chips" id="suggestion-chips">
-          <div class="chip" data-q="帮我写一个 Python 读取 JSON 文件的函数">🐍 Python JSON 示例</div>
-          <div class="chip" data-q="解释一下什么是 RAG 技术，它是如何工作的？">📚 什么是 RAG？</div>
-          <div class="chip" data-q="Transformer 模型的工作原理是什么？">🧠 Transformer 原理</div>
-          <div class="chip" data-q="请总结一下我上传的文档内容">📄 总结我的文档</div>
-        </div>
+    <div class="messages-inner" id="messages-inner"></div>
+    <!-- Welcome screen — sibling of messages-inner, absolutely positioned so
+         innerHTML='' on messages-inner never removes it from the DOM -->
+    <div class="welcome" id="welcome-screen">
+      <div class="welcome-icon">✨</div>
+      <h1>有什么可以帮助你的？</h1>
+      <p>随时提问，支持编程、知识、分析等各类问题。上传文档后可开启内部知识库检索，回答更精准。</p>
+      <div class="suggestion-chips" id="suggestion-chips">
+        <div class="chip" data-q="帮我写一个 Python 读取 JSON 文件的函数">🐍 Python JSON 示例</div>
+        <div class="chip" data-q="解释一下什么是 RAG 技术，它是如何工作的？">📚 什么是 RAG？</div>
+        <div class="chip" data-q="Transformer 模型的工作原理是什么？">🧠 Transformer 原理</div>
+        <div class="chip" data-q="请总结一下我上传的文档内容">📄 总结我的文档</div>
       </div>
     </div>
   </div>
@@ -1091,12 +1094,12 @@ function renderSidebar() {
 function renderMessages() {
   const inner = document.getElementById('messages-inner');
   const chat = getActiveChat();
+  const w = document.getElementById('welcome-screen');
 
   // 始终通过 getElementById 获取 welcome，避免引用断裂
   const showWelcome = () => {
     inner.innerHTML = '';
-    const w = document.getElementById('welcome-screen');
-    if (w) { inner.appendChild(w); w.style.display = 'flex'; }
+    if (w) w.style.display = 'flex';
   };
 
   if (!chat || chat.messages.length === 0) {
@@ -1104,7 +1107,6 @@ function renderMessages() {
     return;
   }
 
-  const w = document.getElementById('welcome-screen');
   if (w) w.style.display = 'none';
   inner.innerHTML = '';
 
@@ -1224,7 +1226,8 @@ async function sendMessage(e, forcedContent = null) {
   updateSendButton(true);
 
   // Hide welcome
-  document.getElementById('welcome-screen').style.display = 'none';
+  const welcomeEl = document.getElementById('welcome-screen');
+  if (welcomeEl) welcomeEl.style.display = 'none';
 
   // Add user message
   const userMsg = {id: generateId(), role: 'user', content, time: Date.now()};
@@ -1531,10 +1534,8 @@ function init() {
     state.activeChatId = null;
     renderSidebar();
     // Show welcome
-    const inner = document.getElementById('messages-inner');
-    inner.innerHTML = '';
     const welcome = document.getElementById('welcome-screen');
-    if (welcome) { inner.appendChild(welcome); welcome.style.display = 'flex'; }
+    if (welcome) welcome.style.display = 'flex';
   }
 
   // New chat button
