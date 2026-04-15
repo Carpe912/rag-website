@@ -370,6 +370,7 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
                 resp = client.embeddings.create(
                     model=EMBED_MODEL,
                     input=batch,
+                    dimensions=EMBED_DIMS,   # text-embedding-v3 支持指定维度
                 )
                 sorted_data = sorted(resp.data, key=lambda x: x.index)
                 all_embeddings.extend([item.embedding for item in sorted_data])
@@ -395,13 +396,52 @@ def embed_query(query: str) -> list[float]:
 # Text extraction
 # ---------------------------------------------------------------------------
 
+def _clean_markdown(text: str) -> str:
+    """
+    清理 Markdown 中无法被 RAG 利用的媒体引用，保留语义信息：
+      - 图片 ![alt](url)         → [图片: alt]（保留 alt 作为语义锚点）
+      - 视频 <video ...>         → [视频内容]
+      - HTML <img alt="...">     → [图片: alt]
+      - 行内 HTML 标签           → 去除标签，保留内容
+    """
+    # HTML <img> 标签 → 提取 alt
+    def img_tag_replace(m: re.Match) -> str:
+        alt = re.search(r'alt=["\']([^"\']*)["\']', m.group(0))
+        label = alt.group(1).strip() if alt else ""
+        return f"[图片: {label}]" if label else "[图片]"
+
+    text = re.sub(r'<img\b[^>]*/?>',        img_tag_replace,   text, flags=re.IGNORECASE)
+
+    # HTML <video> / <audio> 块 → 占位符
+    text = re.sub(r'<video\b[^>]*>.*?</video>', "[视频内容]", text, flags=re.IGNORECASE | re.DOTALL)
+    text = re.sub(r'<video\b[^>]*/?>',          "[视频内容]", text, flags=re.IGNORECASE)
+    text = re.sub(r'<audio\b[^>]*>.*?</audio>', "[音频内容]", text, flags=re.IGNORECASE | re.DOTALL)
+
+    # Markdown 图片 ![alt](url) → [图片: alt]
+    def md_img_replace(m: re.Match) -> str:
+        alt = m.group(1).strip()
+        return f"[图片: {alt}]" if alt else "[图片]"
+
+    text = re.sub(r'!\[([^\]]*)\]\([^)]*\)', md_img_replace, text)
+
+    # Markdown 链接 [text](url) → 保留 text
+    text = re.sub(r'\[([^\]]+)\]\([^)]*\)', r'\1', text)
+
+    # 剩余行内 HTML 标签（<span>、<div> 等）→ 去标签保留内容
+    text = re.sub(r'<[^>]+>', '', text)
+
+    return text
+
+
 def extract_text(file_bytes: bytes, filename: str) -> str:
     ext = Path(filename).suffix.lower().lstrip(".")
     if ext in ("txt", "md"):
         try:
-            return file_bytes.decode("utf-8")
+            raw = file_bytes.decode("utf-8")
         except UnicodeDecodeError:
-            return file_bytes.decode("latin-1", errors="replace")
+            raw = file_bytes.decode("latin-1", errors="replace")
+        # Markdown 文件额外清理媒体标签，避免噪声进入分块
+        return _clean_markdown(raw) if ext == "md" else raw
     elif ext == "pdf":
         try:
             import fitz
