@@ -18,7 +18,19 @@
 /* ===== CSS Reset & Variables ===== */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* ── 结构变量（不随主题变化）── */
 :root {
+  --sidebar-width: 260px;
+  --content-width: 900px;
+  --radius:        10px;
+  --radius-sm:     6px;
+  --font-sans:     -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono:     "JetBrains Mono", "Fira Code", Consolas, monospace;
+  --transition:    0.18s ease;
+}
+
+/* ── Dark 主题（默认）── */
+:root, [data-theme="dark"] {
   --bg-primary:    #0f0f10;
   --bg-secondary:  #18181b;
   --bg-hover:      #27272a;
@@ -33,12 +45,30 @@
   --danger:        #ef4444;
   --success:       #22c55e;
   --warning:       #f59e0b;
-  --sidebar-width: 260px;
-  --radius:        10px;
-  --radius-sm:     6px;
   --shadow:        0 4px 24px rgba(0,0,0,0.4);
-  --font-sans:     -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  --font-mono:     "JetBrains Mono", "Fira Code", Consolas, monospace;
+}
+
+/* ── Light 主题 ── */
+[data-theme="light"] {
+  --bg-primary:    #f4f4f5;
+  --bg-secondary:  #ffffff;
+  --bg-hover:      #e4e4e7;
+  --bg-active:     #d4d4d8;
+  --border:        #e4e4e7;
+  --text-primary:  #18181b;
+  --text-secondary:#52525b;
+  --text-muted:    #a1a1aa;
+  --accent:        #6366f1;
+  --accent-hover:  #4f46e5;
+  --accent-light:  rgba(99,102,241,0.12);
+  --danger:        #dc2626;
+  --success:       #16a34a;
+  --warning:       #d97706;
+  --shadow:        0 4px 24px rgba(0,0,0,0.1);
+}
+
+/* ── 兼容旧 :root 写法（--transition 已移到 :root）── */
+:root {
   --transition:    0.18s ease;
 }
 
@@ -65,8 +95,81 @@ body {
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
-  transition: transform var(--transition);
+  transition: width 0.22s ease, border-color 0.22s ease;
   z-index: 10;
+  position: relative;   /* 让 resizer 定位正确 */
+  overflow: visible;    /* resizer 需要溢出 */
+  min-width: 0;
+}
+.sidebar.collapsed {
+  width: 0 !important;
+  border-right-color: transparent;
+  overflow: hidden;
+}
+
+/* 拖拽手柄 */
+.sidebar-resizer {
+  position: absolute;
+  right: -4px; top: 0; bottom: 0;
+  width: 8px;
+  cursor: ew-resize;
+  z-index: 30;
+  border-radius: 4px;
+  transition: background 0.15s;
+}
+.sidebar-resizer:hover,
+.sidebar-resizer.dragging { background: var(--accent); opacity: 0.6; }
+
+/* 折叠按钮 & 主题按钮（sidebar header 右侧） */
+.sidebar-icon-btn {
+  background: none; border: none;
+  color: var(--text-muted); cursor: pointer;
+  padding: 4px; border-radius: var(--radius-sm);
+  display: flex; align-items: center;
+  transition: color var(--transition), background var(--transition);
+  flex-shrink: 0;
+}
+.sidebar-icon-btn:hover { color: var(--text-primary); background: var(--bg-hover); }
+
+/* 展开侧栏 FAB（侧栏收起后显示）*/
+.sidebar-expand-fab {
+  display: none;
+  position: fixed; left: 12px; top: 12px;
+  z-index: 200;
+  background: var(--accent); border: none; color: white;
+  width: 36px; height: 36px; border-radius: var(--radius-sm);
+  align-items: center; justify-content: center;
+  cursor: pointer; box-shadow: var(--shadow);
+  transition: background var(--transition);
+}
+.sidebar-expand-fab:hover { background: var(--accent-hover); }
+.sidebar-expand-fab.visible { display: flex; }
+
+/* 主题选择器 */
+.theme-picker-wrap { position: relative; }
+.theme-picker {
+  display: none; position: absolute;
+  top: calc(100% + 6px); right: 0;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 6px;
+  z-index: 300; box-shadow: var(--shadow);
+  min-width: 130px; flex-direction: column; gap: 2px;
+}
+.theme-picker.open { display: flex; }
+.theme-option {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 8px; border-radius: var(--radius-sm);
+  cursor: pointer; font-size: 12px;
+  color: var(--text-secondary);
+  border: none; background: none; width: 100%; text-align: left;
+  transition: background var(--transition), color var(--transition);
+}
+.theme-option:hover { background: var(--bg-hover); color: var(--text-primary); }
+.theme-option.active { background: var(--accent-light); color: var(--accent); font-weight: 600; }
+.theme-swatch {
+  width: 13px; height: 13px; border-radius: 50%; flex-shrink: 0;
+  border: 2px solid rgba(128,128,128,0.3);
 }
 
 .sidebar-header {
@@ -304,7 +407,7 @@ body {
 }
 
 .messages-inner {
-  max-width: 780px;
+  max-width: var(--content-width);
   margin: 0 auto;
   padding: 24px 20px 8px;
   display: flex;
@@ -605,7 +708,7 @@ body {
 }
 
 .input-inner {
-  max-width: 780px;
+  max-width: var(--content-width);
   margin: 0 auto;
 }
 
@@ -809,7 +912,32 @@ textarea#chat-input::placeholder { color: var(--text-muted); }
   <div class="sidebar-header">
     <div class="logo">
       <div class="logo-icon">🤖</div>
-      智能问答助手
+      <span style="flex:1;min-width:0;">智能问答助手</span>
+      <!-- 主题选择器 -->
+      <div class="theme-picker-wrap">
+        <button class="sidebar-icon-btn" id="theme-btn" title="切换主题">
+          <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+          </svg>
+        </button>
+        <div class="theme-picker" id="theme-picker">
+          <button class="theme-option" data-theme="dark">
+            <span class="theme-swatch" style="background:#18181b"></span>深色
+          </button>
+          <button class="theme-option" data-theme="light">
+            <span class="theme-swatch" style="background:#f4f4f5;border-color:#d4d4d8"></span>浅色
+          </button>
+          <button class="theme-option" data-theme="system">
+            <span class="theme-swatch" style="background:linear-gradient(135deg,#18181b 50%,#f4f4f5 50%);border-color:#888"></span>跟随系统
+          </button>
+        </div>
+      </div>
+      <!-- 折叠按钮 -->
+      <button class="sidebar-icon-btn" id="sidebar-collapse-btn" title="收起侧栏">
+        <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+          <polyline points="15 18 9 12 15 6"/>
+        </svg>
+      </button>
     </div>
     <button class="btn-new-chat" id="btn-new-chat">
       <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
@@ -850,7 +978,17 @@ textarea#chat-input::placeholder { color: var(--text-muted); }
       启用知识库检索
     </label>
   </div>
+
+  <!-- 拖拽手柄 -->
+  <div class="sidebar-resizer" id="sidebar-resizer"></div>
 </aside>
+
+<!-- 侧栏收起后的展开按钮 -->
+<button class="sidebar-expand-fab" id="sidebar-expand-fab" title="展开侧栏">
+  <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+    <polyline points="9 18 15 12 9 6"/>
+  </svg>
+</button>
 
 <!-- ===== MAIN ===== -->
 <main class="main">
@@ -1649,9 +1787,9 @@ function stopEmbedPolling() {
 // ============================================================
 function init() {
   loadChats();
-  loadEmbeddingDocs();              // 恢复刷新前的向量化状态
+  loadEmbeddingDocs();
   loadDocuments();
-  if (state.embeddingDocs.size > 0) startEmbedPolling();  // 自动续上轮询
+  if (state.embeddingDocs.size > 0) startEmbedPolling();
 
   // If there's a saved active chat, render it; otherwise show welcome
   if (state.activeChatId && state.chats.find(c => c.id === state.activeChatId)) {
@@ -1660,7 +1798,6 @@ function init() {
   } else {
     state.activeChatId = null;
     renderSidebar();
-    // Show welcome
     const welcome = document.getElementById('welcome-screen');
     if (welcome) welcome.style.display = 'flex';
   }
@@ -1698,7 +1835,7 @@ function init() {
 
   // File upload
   document.getElementById('btn-upload-trigger').onclick = (e) => {
-    e.stopPropagation();  // 阻止冒泡到 .main，避免 file dialog 被打断
+    e.stopPropagation();
     document.getElementById('file-input').click();
   };
   document.getElementById('file-input').onchange = e => {
@@ -1713,9 +1850,7 @@ function init() {
   // Close sidebar on main click (mobile)
   document.querySelector('.main').addEventListener('click', () => {
     const sidebar = document.getElementById('sidebar');
-    if (sidebar.classList.contains('open')) {
-      sidebar.classList.remove('open');
-    }
+    if (sidebar.classList.contains('open')) sidebar.classList.remove('open');
   });
 
   // Drag and drop
@@ -1740,6 +1875,104 @@ function init() {
     document.getElementById('drop-overlay').classList.remove('active');
     const file = e.dataTransfer.files[0];
     if (file) uploadFile(file);
+  });
+
+  // ── 主题系统 ──────────────────────────────────────────────
+  const systemMq = window.matchMedia('(prefers-color-scheme: dark)');
+
+  function resolveTheme(id) {
+    if (id === 'system') return systemMq.matches ? 'dark' : 'light';
+    return id;
+  }
+
+  function applyTheme(id) {
+    localStorage.setItem('qa-theme', id);
+    document.documentElement.setAttribute('data-theme', resolveTheme(id));
+    document.querySelectorAll('.theme-option').forEach(btn =>
+      btn.classList.toggle('active', btn.dataset.theme === id)
+    );
+  }
+
+  // 系统主题变化时自动跟随
+  systemMq.addEventListener('change', () => {
+    if (localStorage.getItem('qa-theme') === 'system') {
+      document.documentElement.setAttribute('data-theme', resolveTheme('system'));
+    }
+  });
+
+  // 恢复上次主题，默认跟随系统
+  applyTheme(localStorage.getItem('qa-theme') || 'system');
+
+  // 主题按钮开关
+  const themeBtn    = document.getElementById('theme-btn');
+  const themePicker = document.getElementById('theme-picker');
+  themeBtn.addEventListener('click', e => {
+    e.stopPropagation();
+    themePicker.classList.toggle('open');
+  });
+  document.querySelectorAll('.theme-option').forEach(btn => {
+    btn.addEventListener('click', () => {
+      applyTheme(btn.dataset.theme);
+      themePicker.classList.remove('open');
+    });
+  });
+  document.addEventListener('click', () => themePicker.classList.remove('open'));
+
+  // ── 侧栏折叠 ─────────────────────────────────────────────
+  const sidebar   = document.getElementById('sidebar');
+  const expandFab = document.getElementById('sidebar-expand-fab');
+
+  function collapseSidebar() {
+    if (window.innerWidth <= 640) return; // 移动端走 open/close
+    sidebar.classList.add('collapsed');
+    expandFab.classList.add('visible');
+    localStorage.setItem('qa-sidebar-collapsed', '1');
+  }
+  function expandSidebar() {
+    sidebar.classList.remove('collapsed');
+    expandFab.classList.remove('visible');
+    localStorage.removeItem('qa-sidebar-collapsed');
+  }
+
+  document.getElementById('sidebar-collapse-btn').addEventListener('click', collapseSidebar);
+  expandFab.addEventListener('click', expandSidebar);
+
+  // 恢复折叠状态
+  if (localStorage.getItem('qa-sidebar-collapsed')) collapseSidebar();
+
+  // ── 侧栏拖拽调宽 ──────────────────────────────────────────
+  const resizer   = document.getElementById('sidebar-resizer');
+  const MIN_W = 180, MAX_W = 480;
+
+  function setSidebarWidth(w) {
+    document.documentElement.style.setProperty('--sidebar-width', w + 'px');
+    localStorage.setItem('qa-sidebar-width', w);
+  }
+
+  // 恢复上次宽度
+  const savedW = parseInt(localStorage.getItem('qa-sidebar-width') || '0');
+  if (savedW >= MIN_W && savedW <= MAX_W) setSidebarWidth(savedW);
+
+  let isResizing = false;
+  resizer.addEventListener('mousedown', e => {
+    if (sidebar.classList.contains('collapsed')) return;
+    isResizing = true;
+    resizer.classList.add('dragging');
+    document.body.style.cursor = 'ew-resize';
+    document.body.style.userSelect = 'none';
+    e.preventDefault();
+  });
+  document.addEventListener('mousemove', e => {
+    if (!isResizing) return;
+    const w = Math.max(MIN_W, Math.min(MAX_W, e.clientX));
+    setSidebarWidth(w);
+  });
+  document.addEventListener('mouseup', () => {
+    if (!isResizing) return;
+    isResizing = false;
+    resizer.classList.remove('dragging');
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
   });
 }
 
