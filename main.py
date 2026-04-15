@@ -7,8 +7,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
-import subprocess
 import sys
 from typing import AsyncGenerator
 
@@ -37,6 +37,25 @@ from rag import (
 )
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# 后台向量化任务（asyncio，运行在同一进程，无环境隔离问题）
+# ---------------------------------------------------------------------------
+
+async def _bg_embed(doc_id: str) -> None:
+    """在 asyncio 线程池中执行向量化，不阻塞 event loop。"""
+    loop = asyncio.get_running_loop()
+    try:
+        ok = await loop.run_in_executor(None, re_embed_document, doc_id)
+        if ok:
+            logger.info(f"[Embed] 文档 {doc_id} 向量化完成")
+        else:
+            logger.warning(f"[Embed] 文档 {doc_id} 向量化失败（re_embed_document 返回 False）")
+    except Exception as exc:
+        logger.error(f"[Embed] 文档 {doc_id} 向量化异常: {exc}")
 
 # ---------------------------------------------------------------------------
 # App setup
@@ -264,14 +283,8 @@ async def upload_document(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=f"文件处理失败: {exc}") from exc
 
     if _embedding_available() and doc.chunk_count > 0:
-        # 用独立子进程做向量化，完全隔离于 uvicorn worker，不影响服务稳定性
-        subprocess.Popen(
-            [sys.executable, "-c",
-             f"from rag import re_embed_document; re_embed_document('{doc.doc_id}')"],
-            cwd=os.getcwd(),
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+        # 在主进程 asyncio 线程池里后台执行，不受子进程环境隔离影响
+        asyncio.create_task(_bg_embed(doc.doc_id))
         embed_hint = f"（后台向量化中，共 {doc.chunk_count} 块，请稍候…）"
     else:
         embed_hint = "（TF-IDF 模式，未配置 Embedding API）"
@@ -312,14 +325,8 @@ async def reembed_document(doc_id: str):
     if not target:
         raise HTTPException(status_code=404, detail="文档不存在。")
 
-    # 子进程后台执行，不阻塞服务
-    subprocess.Popen(
-        [sys.executable, "-c",
-         f"from rag import re_embed_document; re_embed_document('{doc_id}')"],
-        cwd=os.getcwd(),
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    # asyncio 后台任务执行，不阻塞服务
+    asyncio.create_task(_bg_embed(doc_id))
     return {"message": f"向量化已在后台启动，共 {target['chunk_count']} 块，请稍候查看状态。", "doc_id": doc_id}
 
 
