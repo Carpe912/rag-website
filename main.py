@@ -282,20 +282,10 @@ async def upload_document(file: UploadFile = File(...)):
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"文件处理失败: {exc}") from exc
 
-    embed_error: str | None = None
     if _embedding_available() and doc.chunk_count > 0:
-        # 同步执行向量化，直接在响应里返回真实结果，方便排查
-        loop = asyncio.get_running_loop()
-        try:
-            ok = await loop.run_in_executor(None, re_embed_document, doc.doc_id)
-            if ok:
-                doc.has_embeddings = True
-                embed_hint = f"（已完成向量化，共 {doc.chunk_count} 块）"
-            else:
-                embed_hint = f"（向量化失败，使用 TF-IDF 降级，共 {doc.chunk_count} 块）"
-        except Exception as exc:
-            embed_error = str(exc)
-            embed_hint = f"（向量化异常: {exc}）"
+        # 立即返回，向量化在后台异步执行，前端轮询 has_embeddings 感知完成
+        asyncio.create_task(_bg_embed(doc.doc_id))
+        embed_hint = f"（后台向量化中，共 {doc.chunk_count} 块，请稍候…）"
     else:
         embed_hint = "（TF-IDF 模式，未配置 Embedding API）"
 
@@ -306,7 +296,6 @@ async def upload_document(file: UploadFile = File(...)):
         "char_count": doc.char_count,
         "chunk_count": doc.chunk_count,
         "has_embeddings": doc.has_embeddings,
-        "embed_error": embed_error,
         "message": f"'{filename}' 已成功导入，共 {doc.chunk_count} 个文本块 {embed_hint}。",
     }
 
