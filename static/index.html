@@ -1442,6 +1442,18 @@ async function loadDocuments() {
     if (!resp.ok) return;
     const data = await resp.json();
     state.documents = data.documents || [];
+
+    // 修正：拿到最新列表后，将已完成向量化的 doc 从 embeddingDocs 中移除，
+    // 避免页面刷新后"卡在向量化中"的问题（子进程可能在刷新前已经完成）
+    let anyCleared = false;
+    for (const doc of state.documents) {
+      if (state.embeddingDocs.has(doc.doc_id) && doc.has_embeddings) {
+        state.embeddingDocs.delete(doc.doc_id);
+        anyCleared = true;
+      }
+    }
+    if (anyCleared) saveEmbeddingDocs();
+
     renderDocList();
   } catch (e) { /* offline, ignore */ }
 }
