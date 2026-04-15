@@ -282,10 +282,20 @@ async def upload_document(file: UploadFile = File(...)):
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"文件处理失败: {exc}") from exc
 
+    embed_error: str | None = None
     if _embedding_available() and doc.chunk_count > 0:
-        # 在主进程 asyncio 线程池里后台执行，不受子进程环境隔离影响
-        asyncio.create_task(_bg_embed(doc.doc_id))
-        embed_hint = f"（后台向量化中，共 {doc.chunk_count} 块，请稍候…）"
+        # 同步执行向量化，直接在响应里返回真实结果，方便排查
+        loop = asyncio.get_running_loop()
+        try:
+            ok = await loop.run_in_executor(None, re_embed_document, doc.doc_id)
+            if ok:
+                doc.has_embeddings = True
+                embed_hint = f"（已完成向量化，共 {doc.chunk_count} 块）"
+            else:
+                embed_hint = f"（向量化失败，使用 TF-IDF 降级，共 {doc.chunk_count} 块）"
+        except Exception as exc:
+            embed_error = str(exc)
+            embed_hint = f"（向量化异常: {exc}）"
     else:
         embed_hint = "（TF-IDF 模式，未配置 Embedding API）"
 
@@ -296,6 +306,7 @@ async def upload_document(file: UploadFile = File(...)):
         "char_count": doc.char_count,
         "chunk_count": doc.chunk_count,
         "has_embeddings": doc.has_embeddings,
+        "embed_error": embed_error,
         "message": f"'{filename}' 已成功导入，共 {doc.chunk_count} 个文本块 {embed_hint}。",
     }
 
@@ -328,6 +339,54 @@ async def reembed_document(doc_id: str):
     # asyncio 后台任务执行，不阻塞服务
     asyncio.create_task(_bg_embed(doc_id))
     return {"message": f"向量化已在后台启动，共 {target['chunk_count']} 块，请稍候查看状态。", "doc_id": doc_id}
+
+
+# ---------------------------------------------------------------------------
+# 诊断接口：同步测试 Embedding API 是否可用，直接返回错误原因
+# ---------------------------------------------------------------------------
+
+@app.get("/api/embed-test")
+async def embed_test():
+    """
+    同步测试向量化整条链路，直接返回成功或详细报错。
+    用于排查 has_embeddings 始终为 false 的问题。
+    """
+    from rag import embed_texts, _embedding_available, _chroma_available, _get_chroma_collection
+
+    result: dict = {
+        "embedding_api_configured": _embedding_available(),
+        "embed_model": EMBED_MODEL,
+        "embed_base_url": os.getenv("EMBED_BASE_URL", ""),
+        "chroma_available": _chroma_available(),
+        "embed_api_ok": False,
+        "chroma_write_ok": False,
+        "error": None,
+    }
+
+    if not result["embedding_api_configured"]:
+        result["error"] = "EMBED_API_KEY 或 EMBED_BASE_URL 未配置"
+        return result
+
+    # 测试 Embedding API
+    loop = asyncio.get_running_loop()
+    try:
+        vecs = await loop.run_in_executor(None, embed_texts, ["诊断测试文本"])
+        result["embed_api_ok"] = True
+        result["vector_dim"] = len(vecs[0]) if vecs else 0
+    except Exception as exc:
+        result["error"] = f"Embedding API 调用失败: {exc}"
+        return result
+
+    # 测试 Chroma 写入
+    if result["chroma_available"]:
+        try:
+            col = _get_chroma_collection()
+            result["chroma_count_before"] = col.count()
+            result["chroma_write_ok"] = True
+        except Exception as exc:
+            result["error"] = f"Chroma 初始化失败: {exc}"
+
+    return result
 
 
 # ---------------------------------------------------------------------------
