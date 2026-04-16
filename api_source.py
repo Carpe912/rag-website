@@ -264,12 +264,23 @@ async def fetch_api_data(config: ApiSourceConfig) -> list[str]:
             response.raise_for_status()
             data = response.json()
 
+            logger.info(f"[API Source] 单接口响应顶层字段: {list(data.keys()) if isinstance(data, dict) else type(data).__name__}")
+
             content = _get_nested_value(data, config.content_path)
+            logger.info(f"[API Source] content_path='{config.content_path}' 提取结果类型: {type(content).__name__}, 是否为空: {not content}")
+
             if content:
                 if isinstance(content, list):
-                    results.extend([str(item) for item in content if item])
+                    valid = [str(item) for item in content if item]
+                    logger.info(f"[API Source] 从列表中提取到 {len(valid)} 条有效内容")
+                    results.extend(valid)
                 else:
                     results.append(str(content))
+            else:
+                logger.warning(
+                    f"[API Source] content_path='{config.content_path}' 未提取到内容，"
+                    f"请检查路径是否正确。响应数据预览: {str(data)[:500]}"
+                )
 
         elif config.source_type == "list_detail":
             # 列表+详情模式
@@ -282,6 +293,8 @@ async def fetch_api_data(config: ApiSourceConfig) -> list[str]:
             list_response.raise_for_status()
             list_data = list_response.json()
 
+            logger.info(f"[API Source] 列表接口响应顶层字段: {list(list_data.keys()) if isinstance(list_data, dict) else type(list_data).__name__}")
+
             # 2. 应用转换脚本（如果有）
             if config.transform_script:
                 logger.info(f"[API Source] 应用数据转换脚本")
@@ -289,8 +302,14 @@ async def fetch_api_data(config: ApiSourceConfig) -> list[str]:
 
             # 3. 提取ID列表
             ids = _get_nested_value(list_data, config.list_id_path)
+            logger.info(f"[API Source] list_id_path='{config.list_id_path}' 提取结果: {type(ids).__name__}, 值预览: {str(ids)[:200]}")
+
             if not ids:
-                logger.warning(f"[API Source] 未从列表接口提取到ID: {config.name}")
+                logger.warning(
+                    f"[API Source] 未从列表接口提取到ID: {config.name}，"
+                    f"请检查 list_id_path='{config.list_id_path}' 是否正确。"
+                    f"响应数据预览: {str(list_data)[:500]}"
+                )
                 return results
 
             if not isinstance(ids, list):
@@ -313,6 +332,11 @@ async def fetch_api_data(config: ApiSourceConfig) -> list[str]:
                     content = _get_nested_value(detail_data, config.detail_content_path)
                     if content:
                         results.append(str(content))
+                    else:
+                        logger.warning(
+                            f"[API Source] 详情接口 detail_content_path='{config.detail_content_path}' "
+                            f"未提取到内容 (ID={item_id})，响应预览: {str(detail_data)[:300]}"
+                        )
                 except Exception as e:
                     logger.error(f"[API Source] 获取详情失败 (ID={item_id}): {e}")
                     continue
