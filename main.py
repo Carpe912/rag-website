@@ -466,6 +466,7 @@ class ApiSourceCreateRequest(BaseModel):
     content_path: str = ""
     list_api_url: str = ""
     list_id_path: str = ""
+    list_title_path: str = ""    # 标题字段路径，如 "[].name"
     detail_api_url: str = ""
     detail_content_path: str = ""
     transform_script: str = ""  # 数据转换脚本
@@ -502,6 +503,7 @@ async def create_api_source(request: ApiSourceCreateRequest):
         content_path=request.content_path,
         list_api_url=request.list_api_url,
         list_id_path=request.list_id_path,
+        list_title_path=request.list_title_path,
         detail_api_url=request.detail_api_url,
         detail_content_path=request.detail_content_path,
         transform_script=request.transform_script,

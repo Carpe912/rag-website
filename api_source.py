@@ -33,6 +33,7 @@ class ApiSourceConfig:
     # 列表+详情模式
     list_api_url: str = ""       # 列表接口地址
     list_id_path: str = ""       # 列表中ID字段路径，如 "results[].id"
+    list_title_path: str = ""    # 列表中标题字段路径，如 "[].name"，用于给文档命名
     detail_api_url: str = ""     # 详情接口地址模板，如 "https://api.com/detail/{id}"
     detail_content_path: str = "" # 详情内容字段路径
 
@@ -246,12 +247,12 @@ def _apply_transform(data: Any, script: str) -> Any:
         raise ValueError(f"数据转换失败: {e}")
 
 
-async def fetch_api_data(config: ApiSourceConfig) -> list[str]:
+async def fetch_api_data(config: ApiSourceConfig) -> list[tuple[str, str]]:
     """
     从API获取数据
-    返回: markdown文本列表
+    返回: (title, markdown文本) 元组列表
     """
-    results: list[str] = []
+    results: list[tuple[str, str]] = []
 
     async with httpx.AsyncClient(timeout=config.timeout) as client:
         if config.source_type == "single":
@@ -273,9 +274,9 @@ async def fetch_api_data(config: ApiSourceConfig) -> list[str]:
                 if isinstance(content, list):
                     valid = [str(item) for item in content if item]
                     logger.info(f"[API Source] 从列表中提取到 {len(valid)} 条有效内容")
-                    results.extend(valid)
+                    results.extend([(config.name, c) for c in valid])
                 else:
-                    results.append(str(content))
+                    results.append((config.name, str(content)))
             else:
                 logger.warning(
                     f"[API Source] content_path='{config.content_path}' 未提取到内容，"
@@ -315,10 +316,21 @@ async def fetch_api_data(config: ApiSourceConfig) -> list[str]:
             if not isinstance(ids, list):
                 ids = [ids]
 
+            # 4. 提取标题列表（与ID一一对应）
+            titles: list[str] = []
+            if config.list_title_path:
+                raw_titles = _get_nested_value(list_data, config.list_title_path)
+                if isinstance(raw_titles, list):
+                    titles = [str(t) if t else "" for t in raw_titles]
+                    logger.info(f"[API Source] list_title_path='{config.list_title_path}' 提取到 {len(titles)} 个标题")
+                else:
+                    logger.warning(f"[API Source] list_title_path='{config.list_title_path}' 未提取到标题列表")
+
             logger.info(f"[API Source] 从列表接口获取到 {len(ids)} 个ID")
 
-            # 4. 逐个获取详情
-            for item_id in ids:
+            # 5. 逐个获取详情
+            for idx, item_id in enumerate(ids):
+                title = titles[idx] if idx < len(titles) and titles[idx] else f"{config.name}_{idx + 1}"
                 try:
                     detail_url = config.detail_api_url.replace("{id}", str(item_id))
                     detail_response = await client.request(
@@ -331,7 +343,7 @@ async def fetch_api_data(config: ApiSourceConfig) -> list[str]:
 
                     content = _get_nested_value(detail_data, config.detail_content_path)
                     if content:
-                        results.append(str(content))
+                        results.append((title, str(content)))
                     else:
                         logger.warning(
                             f"[API Source] 详情接口 detail_content_path='{config.detail_content_path}' "
@@ -388,10 +400,14 @@ async def sync_api_source(source_id: str) -> dict:
 
         # 将每条内容作为独立文档入库
         doc_ids = []
-        for idx, content in enumerate(contents):
+        for idx, (title, content) in enumerate(contents):
             try:
-                # 生成文件名
-                filename = f"{config.name}_{idx + 1}.md"
+                # 用文章标题作为文件名，过滤掉文件名中的非法字符
+                safe_title = "".join(c for c in title if c not in r'\/:*?"<>|').strip()
+                if not safe_title:
+                    safe_title = f"{config.name}_{idx + 1}"
+                filename = f"{safe_title}.md"
+
                 file_bytes = content.encode("utf-8")
 
                 # 入库（不立即向量化，返回后由后台任务处理）
