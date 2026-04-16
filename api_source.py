@@ -349,6 +349,19 @@ async def sync_api_source(source_id: str) -> dict:
 
         logger.info(f"[API Source] 获取到 {len(contents)} 条内容")
 
+        # 删除该数据源的旧文档（避免重复）
+        from rag import load_documents, delete_document
+        existing_docs = load_documents()
+        deleted_count = 0
+        for doc in existing_docs:
+            # 匹配该数据源的文档（文件名格式：数据源名_数字.md）
+            if doc.name.startswith(f"{config.name}_") and doc.name.endswith(".md"):
+                if delete_document(doc.doc_id):
+                    deleted_count += 1
+
+        if deleted_count > 0:
+            logger.info(f"[API Source] 已删除 {deleted_count} 个旧文档")
+
         # 将每条内容作为独立文档入库
         doc_ids = []
         for idx, content in enumerate(contents):
