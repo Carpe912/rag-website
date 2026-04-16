@@ -69,6 +69,7 @@ class Chunk:
     doc_name:   str
     text:       str
     char_start: int
+    source_url: str = ""  # 数据来源URL
     # embedding 仅在 Chroma 不可用时写入 JSON（NumPy 降级）
     embedding:  list[float] = field(default_factory=list)
 
@@ -81,6 +82,7 @@ class Document:
     char_count:     int
     chunk_count:    int
     has_embeddings: bool = False
+    source_url:     str = ""  # 数据来源URL（API数据源有值，上传文件为空）
     chunks: list[Chunk] = field(default_factory=list)
 
 
@@ -772,11 +774,21 @@ def build_rag_system_prompt(base_system: str, query: str) -> str:
     if not context:
         return base_system
 
-    rag_block = f"""你可以访问以下与用户问题相关的内部知识库内容。请使用这些信息提供准确、有依据的回答，并在引用具体信息时注明来源文档名称。
+    rag_block = f"""你可以访问以下与用户问题相关的内部知识库内容。
 
 <knowledge_base>
 {context}
 </knowledge_base>
+
+回答要求：
+1. **综合分析**：结合内部知识库内容和你的外部知识，提供全面、准确的回答
+2. **优先级**：内部知识库的信息优先级更高，是最权威的参考
+3. **补充扩展**：如果知识库内容不完整，可以用你的外部知识补充背景、原理、最佳实践等
+4. **明确来源**：
+   - 引用知识库内容时，注明来源文档名称
+   - 使用外部知识时，说明这是基于通用知识的补充，并提供相关参考链接（如维基百科、百度百科等搜索链接）
+   - 参考链接格式示例：[维基百科 - Python](https://zh.wikipedia.org/wiki/Python)、[百度百科 - Python](https://baike.baidu.com/item/Python)
+5. **深度结合**：不要只是罗列知识库内容，要分析、解释、关联，形成有洞察力的回答
 
 """
     return rag_block + base_system
