@@ -1438,38 +1438,24 @@ async function sendMessage(e, forcedContent = null) {
   state.abortController = new AbortController();
 
   let fullText = '';
-  let firstToken = true;  // 收到第一个 token 后移除 thinking，切换为流式模式
+  let firstToken = true;  // 收到第一个 token 后移除 thinking，开始渲染
 
-  // 流式文本节点：纯文本追加 + 打字机动画，最后再做 markdown 渲染
-  const streamingPre = document.createElement('div');
-  streamingPre.className = 'streaming-text';
-  streamingPre.style.cssText = 'white-space: pre-wrap; word-break: break-word; font-size:14px; line-height:1.65;';
+  // 流式 Markdown 实时渲染：节流 80ms（≈12fps），避免每个 token 都触发 DOM 重绘
+  let renderTimer = null;
 
-  const cursor = document.createElement('span');
-  cursor.className = 'cursor';
-
-  // 打字机：displayedLen 追赶 fullText.length，速度自适应
-  let displayedLen = 0;
-  let rafHandle = null;
-
-  function typewriterTick() {
-    rafHandle = null;
-    if (displayedLen >= fullText.length) return;
-    const behind = fullText.length - displayedLen;
-    // 离得越远追得越快，近处放慢给打字机感
-    const speed = behind > 80 ? 10 : behind > 20 ? 5 : 2;
-    displayedLen = Math.min(displayedLen + speed, fullText.length);
-    streamingPre.textContent = fullText.slice(0, displayedLen);
-    streamingPre.appendChild(cursor);
+  function renderMarkdown() {
+    renderTimer = null;
+    bubbleContent.innerHTML = marked.parse(fullText);
+    // 在渲染结果末尾追加闪烁光标
+    const cur = document.createElement('span');
+    cur.className = 'cursor';
+    bubbleContent.appendChild(cur);
     scrollToBottom();
-    if (displayedLen < fullText.length) {
-      rafHandle = requestAnimationFrame(typewriterTick);
-    }
   }
 
   function scheduleRender() {
-    if (rafHandle) return;
-    rafHandle = requestAnimationFrame(typewriterTick);
+    if (renderTimer) return;
+    renderTimer = setTimeout(renderMarkdown, 80);
   }
 
   try {
@@ -1502,12 +1488,10 @@ async function sendMessage(e, forcedContent = null) {
         try {
           const data = JSON.parse(line.slice(6));
           if (data.type === 'text') {
-            // 收到第一个 token：移除 thinking，切换到流式文本节点
+            // 收到第一个 token：移除 thinking，直接开始 Markdown 渲染
             if (firstToken) {
               firstToken = false;
               thinkingEl.remove();
-              bubbleContent.appendChild(streamingPre);
-              streamingPre.appendChild(cursor);
             }
             fullText += data.text;
             scheduleRender();
@@ -1522,30 +1506,19 @@ async function sendMessage(e, forcedContent = null) {
       }
     }
 
-    // 流结束：立即刷新剩余字符，再用 marked 完整渲染 markdown
-    if (rafHandle) { cancelAnimationFrame(rafHandle); rafHandle = null; }
-    cursor.remove();
-    streamingPre.remove();
-    bubbleContent.style.opacity = '0';
+    // 流结束：清除节流定时器，做最终完整渲染（去掉光标）
+    if (renderTimer) { clearTimeout(renderTimer); renderTimer = null; }
     bubbleContent.innerHTML = marked.parse(fullText || '（无响应）');
-    bubbleContent.style.transition = 'opacity 0.25s ease';
-    requestAnimationFrame(() => { bubbleContent.style.opacity = '1'; });
     assistantMsg.content = fullText;
 
   } catch (err) {
-    if (rafHandle) { cancelAnimationFrame(rafHandle); rafHandle = null; }
-    cursor.remove();
+    if (renderTimer) { clearTimeout(renderTimer); renderTimer = null; }
     thinkingEl.remove();
     if (err.name === 'AbortError') {
-      // 用户手动停止：保留已接收内容并做 markdown 渲染
-      streamingPre.remove();
-      bubbleContent.style.opacity = '0';
+      // 用户手动停止：保留已接收内容
       bubbleContent.innerHTML = marked.parse(fullText || '');
-      bubbleContent.style.transition = 'opacity 0.25s ease';
-      requestAnimationFrame(() => { bubbleContent.style.opacity = '1'; });
       assistantMsg.content = fullText;
     } else {
-      streamingPre.remove();
       const errText = `❌ **错误：** ${err.message}`;
       bubbleContent.innerHTML = marked.parse(errText);
       bubbleContent.classList.add('error-bubble');
