@@ -77,6 +77,24 @@ ID字段路径: results[].id
 详情内容字段路径: data.content
 ```
 
+### 🌲 树形结构处理（新功能）
+
+如果列表接口返回树形结构，可以使用数据转换脚本：
+
+```python
+def flatten_tree(node, result_list):
+    result_list.append(node)
+    if 'children' in node and node['children']:
+        for child in node['children']:
+            flatten_tree(child, result_list)
+
+result = []
+for item in data:
+    flatten_tree(item, result)
+```
+
+**详细说明**：查看 [TRANSFORM_GUIDE.md](./TRANSFORM_GUIDE.md)
+
 ## 📖 字段路径语法
 
 | 路径 | 说明 | 示例 |

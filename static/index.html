@@ -1971,6 +1971,20 @@ function showApiSourceDialog() {
             border-radius: var(--radius-sm); color: var(--text-primary); font-size: 13px;
           "/>
         </div>
+        <div style="margin-bottom: 12px;">
+          <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">
+            数据转换脚本（可选）
+            <span style="color: var(--text-muted); font-weight: normal;">- 用于处理树形结构等复杂数据</span>
+          </label>
+          <textarea id="transform-script" placeholder="例如：将树形结构扁平化&#10;&#10;def flatten_tree(node, result_list):&#10;    result_list.append(node)&#10;    if 'children' in node:&#10;        for child in node['children']:&#10;            flatten_tree(child, result_list)&#10;&#10;result = []&#10;for item in data:&#10;    flatten_tree(item, result)" style="
+            width: 100%; padding: 8px; background: var(--bg-primary); border: 1px solid var(--border);
+            border-radius: var(--radius-sm); color: var(--text-primary); font-size: 12px;
+            font-family: var(--font-mono); min-height: 120px; resize: vertical;
+          "></textarea>
+          <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">
+            脚本中可用变量：data（原始数据），需设置 result（转换后的数据）
+          </div>
+        </div>
       </div>
 
       <div style="display: flex; gap: 8px; margin-top: 16px;">
@@ -2032,6 +2046,7 @@ function showApiSourceDialog() {
       payload.list_id_path = dialog.querySelector('#list-id-path').value.trim();
       payload.detail_api_url = dialog.querySelector('#detail-api-url').value.trim();
       payload.detail_content_path = dialog.querySelector('#detail-content-path').value.trim();
+      payload.transform_script = dialog.querySelector('#transform-script').value.trim();
       if (!payload.list_api_url || !payload.list_id_path || !payload.detail_api_url || !payload.detail_content_path) {
         showToast('请填写完整的列表+详情配置', 'error');
         return;

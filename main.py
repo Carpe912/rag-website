@@ -468,6 +468,7 @@ class ApiSourceCreateRequest(BaseModel):
     list_id_path: str = ""
     detail_api_url: str = ""
     detail_content_path: str = ""
+    transform_script: str = ""  # 数据转换脚本
     method: str = "GET"
     headers: dict[str, str] = {}
     timeout: int = 30
@@ -503,6 +504,7 @@ async def create_api_source(request: ApiSourceCreateRequest):
         list_id_path=request.list_id_path,
         detail_api_url=request.detail_api_url,
         detail_content_path=request.detail_content_path,
+        transform_script=request.transform_script,
         method=request.method,
         headers=request.headers,
         timeout=request.timeout,

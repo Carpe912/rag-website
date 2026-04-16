@@ -36,6 +36,9 @@ class ApiSourceConfig:
     detail_api_url: str = ""     # 详情接口地址模板，如 "https://api.com/detail/{id}"
     detail_content_path: str = "" # 详情内容字段路径
 
+    # 数据转换（可选）
+    transform_script: str = ""   # Python转换脚本，用于处理列表数据（如树形结构扁平化）
+
     # HTTP配置
     method: str = "GET"          # HTTP方法
     headers: dict[str, str] = field(default_factory=dict)  # 请求头
@@ -173,6 +176,76 @@ def _get_nested_value(data: Any, path: str) -> Any:
     return current
 
 
+def _apply_transform(data: Any, script: str) -> Any:
+    """
+    应用Python转换脚本处理数据
+
+    脚本中可用变量：
+    - data: 原始数据
+    - result: 转换后的结果（需要设置）
+
+    示例脚本（树形结构扁平化）：
+    ```python
+    def flatten_tree(node, result_list):
+        result_list.append(node)
+        if 'children' in node and node['children']:
+            for child in node['children']:
+                flatten_tree(child, result_list)
+
+    result = []
+    if isinstance(data, list):
+        for item in data:
+            flatten_tree(item, result)
+    else:
+        flatten_tree(data, result)
+    ```
+    """
+    if not script or not script.strip():
+        return data
+
+    try:
+        # 创建执行环境
+        exec_globals = {
+            '__builtins__': {
+                'isinstance': isinstance,
+                'list': list,
+                'dict': dict,
+                'str': str,
+                'int': int,
+                'float': float,
+                'len': len,
+                'range': range,
+                'enumerate': enumerate,
+                'zip': zip,
+                'map': map,
+                'filter': filter,
+                'sorted': sorted,
+                'sum': sum,
+                'min': min,
+                'max': max,
+                'any': any,
+                'all': all,
+                'print': print,
+            },
+            'data': data,
+            'result': None,
+        }
+
+        # 执行转换脚本（函数定义和调用都在同一个命名空间）
+        exec(script, exec_globals)
+
+        # 返回转换结果
+        if exec_globals.get('result') is not None:
+            return exec_globals['result']
+        else:
+            logger.warning("[Transform] 脚本未设置 result 变量，返回原始数据")
+            return data
+
+    except Exception as e:
+        logger.error(f"[Transform] 转换脚本执行失败: {e}")
+        raise ValueError(f"数据转换失败: {e}")
+
+
 async def fetch_api_data(config: ApiSourceConfig) -> list[str]:
     """
     从API获取数据
@@ -209,7 +282,12 @@ async def fetch_api_data(config: ApiSourceConfig) -> list[str]:
             list_response.raise_for_status()
             list_data = list_response.json()
 
-            # 2. 提取ID列表
+            # 2. 应用转换脚本（如果有）
+            if config.transform_script:
+                logger.info(f"[API Source] 应用数据转换脚本")
+                list_data = _apply_transform(list_data, config.transform_script)
+
+            # 3. 提取ID列表
             ids = _get_nested_value(list_data, config.list_id_path)
             if not ids:
                 logger.warning(f"[API Source] 未从列表接口提取到ID: {config.name}")
@@ -220,7 +298,7 @@ async def fetch_api_data(config: ApiSourceConfig) -> list[str]:
 
             logger.info(f"[API Source] 从列表接口获取到 {len(ids)} 个ID")
 
-            # 3. 逐个获取详情
+            # 4. 逐个获取详情
             for item_id in ids:
                 try:
                     detail_url = config.detail_api_url.replace("{id}", str(item_id))
