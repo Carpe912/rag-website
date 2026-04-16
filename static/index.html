@@ -2034,6 +2034,7 @@ function showApiSourceDialog() {
   };
 
   dialog.querySelector('#btn-cancel-source').onclick = () => dialog.remove();
+  dialog.querySelector('#btn-save-source').onclick = async () => {
     const name = dialog.querySelector('#source-name').value.trim();
     const sourceType = dialog.querySelector('#source-type').value;
 
