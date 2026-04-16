@@ -29,6 +29,7 @@ https://coop.logwirecloud.com/rest/helper/help/center/691d35c4b9e9c20ba7e83f7d/h
 ```json
 {
   "results": {
+    "title": "如何创建议题",
     "content": "这里是markdown格式的文档内容..."
   }
 }
@@ -38,6 +39,7 @@ https://coop.logwirecloud.com/rest/helper/help/center/691d35c4b9e9c20ba7e83f7d/h
 - 数据源名称：`帮助中心文档`
 - 接口类型：`单接口模式`
 - API地址：`https://coop.logwirecloud.com/rest/helper/help/center/691d35c4b9e9c20ba7e83f7d/help/6949f57bc64bef77a31839d7`
+- 标题字段路径：`results.title`（可选，从响应中动态读取标题）
 - 内容字段路径：`results.content`
 
 ### 示例2：列表+详情模式
@@ -53,11 +55,13 @@ https://api.example.com/docs/list
 ```json
 {
   "results": [
-    {"id": "doc1", "title": "文档1"},
-    {"id": "doc2", "title": "文档2"}
+    {"id": "doc1", "title": "如何创建议题"},
+    {"id": "doc2", "title": "如何删除议题"}
   ]
 }
 ```
+
+> 标题字段与 ID 字段同级，系统在遍历列表时会同时提取两者，无需提前知道所有条目的值。
 
 **详情接口模板：**
 ```
@@ -78,6 +82,7 @@ https://api.example.com/docs/{id}
 - 接口类型：`列表+详情模式`
 - 列表接口地址：`https://api.example.com/docs/list`
 - ID字段路径：`results[].id`
+- 标题字段路径：`results[].title`（可选，与 ID 同级，从每条列表记录中动态提取）
 - 详情接口地址模板：`https://api.example.com/docs/{id}`
 - 详情内容字段路径：`data.content`
 
@@ -190,11 +195,26 @@ GET /api/sources
 POST /api/sources
 Content-Type: application/json
 
+// 单接口模式
 {
   "name": "数据源名称",
-  "source_type": "single",  // 或 "list_detail"
+  "source_type": "single",
   "api_url": "https://...",
+  "title_path": "results.title",      // 可选，从响应中动态读取标题
   "content_path": "results.content",
+  "method": "GET",
+  "timeout": 30
+}
+
+// 列表+详情模式
+{
+  "name": "数据源名称",
+  "source_type": "list_detail",
+  "list_api_url": "https://.../list",
+  "list_id_path": "results[].id",
+  "list_title_path": "results[].title", // 可选，与 ID 同级，从每条列表记录动态提取
+  "detail_api_url": "https://.../{id}",
+  "detail_content_path": "data.content",
   "method": "GET",
   "timeout": 30
 }

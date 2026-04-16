@@ -1932,6 +1932,14 @@ function showApiSourceDialog() {
           "/>
         </div>
         <div style="margin-bottom: 12px;">
+          <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">标题字段路径</label>
+          <input id="title-path" type="text" placeholder="例如：results.title" style="
+            width: 100%; padding: 8px; background: var(--bg-primary); border: 1px solid var(--border);
+            border-radius: var(--radius-sm); color: var(--text-primary); font-size: 13px;
+          "/>
+          <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">文章标题字段，检索时作为上下文提示（可选）</div>
+        </div>
+        <div style="margin-bottom: 12px;">
           <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">内容字段路径</label>
           <input id="content-path" type="text" placeholder="例如：results.content" style="
             width: 100%; padding: 8px; background: var(--bg-primary); border: 1px solid var(--border);
@@ -1955,6 +1963,14 @@ function showApiSourceDialog() {
             width: 100%; padding: 8px; background: var(--bg-primary); border: 1px solid var(--border);
             border-radius: var(--radius-sm); color: var(--text-primary); font-size: 13px;
           "/>
+        </div>
+        <div style="margin-bottom: 12px;">
+          <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">标题字段路径</label>
+          <input id="list-title-path" type="text" placeholder="例如：results[].title" style="
+            width: 100%; padding: 8px; background: var(--bg-primary); border: 1px solid var(--border);
+            border-radius: var(--radius-sm); color: var(--text-primary); font-size: 13px;
+          "/>
+          <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">从列表接口的每条记录中提取标题，与 ID 字段同级（可选）</div>
         </div>
         <div style="margin-bottom: 12px;">
           <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">详情接口地址模板</label>
@@ -2036,6 +2052,7 @@ function showApiSourceDialog() {
 
     if (sourceType === 'single') {
       payload.api_url = dialog.querySelector('#api-url').value.trim();
+      payload.title_path = dialog.querySelector('#title-path').value.trim();
       payload.content_path = dialog.querySelector('#content-path').value.trim();
       if (!payload.api_url || !payload.content_path) {
         showToast('请填写完整的单接口配置', 'error');
@@ -2044,6 +2061,7 @@ function showApiSourceDialog() {
     } else {
       payload.list_api_url = dialog.querySelector('#list-api-url').value.trim();
       payload.list_id_path = dialog.querySelector('#list-id-path').value.trim();
+      payload.list_title_path = dialog.querySelector('#list-title-path').value.trim();
       payload.detail_api_url = dialog.querySelector('#detail-api-url').value.trim();
       payload.detail_content_path = dialog.querySelector('#detail-content-path').value.trim();
       payload.transform_script = dialog.querySelector('#transform-script').value.trim();
