@@ -66,6 +66,22 @@ async def _bg_embed(doc_id: str) -> None:
     except Exception as exc:
         logger.error(f"[Embed] 文档 {doc_id} 向量化异常: {exc}")
 
+
+async def _bg_embed_batch(doc_ids: list[str]) -> None:
+    """顺序向量化多个文档，避免并发请求触发 Embedding API 限流。"""
+    loop = asyncio.get_running_loop()
+    total = len(doc_ids)
+    for i, doc_id in enumerate(doc_ids, 1):
+        try:
+            logger.info(f"[Embed] 向量化进度 {i}/{total}，doc_id={doc_id}")
+            ok = await loop.run_in_executor(None, re_embed_document, doc_id)
+            if ok:
+                logger.info(f"[Embed] 文档 {doc_id} 向量化完成 ({i}/{total})")
+            else:
+                logger.warning(f"[Embed] 文档 {doc_id} 向量化失败（re_embed_document 返回 False）")
+        except Exception as exc:
+            logger.error(f"[Embed] 文档 {doc_id} 向量化异常: {exc}")
+
 # ---------------------------------------------------------------------------
 # App setup
 # ---------------------------------------------------------------------------
@@ -546,10 +562,9 @@ async def sync_api_source_endpoint(source_id: str):
     if not result["success"]:
         raise HTTPException(status_code=500, detail=result["error"])
 
-    # 对所有新文档启动后台向量化
-    if _embedding_available():
-        for doc_id in result["doc_ids"]:
-            asyncio.create_task(_bg_embed(doc_id))
+    # 对所有新文档启动后台向量化（顺序执行，避免并发触发限流）
+    if _embedding_available() and result["doc_ids"]:
+        asyncio.create_task(_bg_embed_batch(result["doc_ids"]))
 
     return {
         "message": f"成功导入 {result['count']} 条内容，向量化进行中…",

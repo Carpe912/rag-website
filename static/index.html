@@ -881,6 +881,39 @@ textarea#chat-input::placeholder { color: var(--text-muted); }
   border-color: rgba(239,68,68,0.3) !important;
   color: #fca5a5;
 }
+
+/* ===== 折叠 / 展开 ===== */
+.section-chevron {
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: transform 0.2s ease;
+  color: var(--text-muted);
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.section-chevron.collapsed { transform: rotate(-90deg); }
+.docs-section-title { cursor: pointer; }
+.docs-section-title:hover .section-chevron { color: var(--text-primary); }
+.hidden-section { display: none !important; }
+
+/* API Source 折叠子文档区 */
+.api-source-group { display: flex; flex-direction: column; }
+.api-source-docs-wrap {
+  display: flex; flex-direction: column; gap: 2px;
+  margin: 2px 0 4px 18px;
+  padding-left: 8px;
+  border-left: 2px solid var(--border);
+}
+.api-source-docs-wrap.hidden { display: none; }
+.api-source-doc-row {
+  display: flex; align-items: center; gap: 5px;
+  padding: 4px 5px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.api-source-doc-row:hover { background: var(--bg-hover); }
+.api-source-doc-row:hover .doc-re-embed,
+.api-source-doc-row:hover .doc-delete { opacity: 1; }
 </style>
 </head>
 <body>
@@ -953,13 +986,16 @@ textarea#chat-input::placeholder { color: var(--text-muted); }
   <!-- Knowledge Base -->
   <div class="docs-section">
     <div class="docs-section-header">
-      <div class="docs-section-title">
+      <div class="docs-section-title" onclick="toggleKnowledge()" title="展开/折叠">
         <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
           <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
           <polyline points="14 2 14 8 20 8"/>
         </svg>
         Knowledge
         <span class="docs-badge" id="docs-badge">0</span>
+        <svg id="knowledge-chevron" class="section-chevron" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+          <polyline points="6 9 12 15 18 9"/>
+        </svg>
       </div>
       <button class="btn-upload" id="btn-upload-trigger">
         <svg width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
@@ -970,13 +1006,14 @@ textarea#chat-input::placeholder { color: var(--text-muted); }
       <input type="file" id="file-input" accept=".txt,.md,.pdf,.xlsx,.xls" style="display:none" />
     </div>
 
-    <div id="upload-progress" class="upload-progress">⏳ 正在处理…</div>
-    <div class="doc-list" id="doc-list"></div>
-
-    <label class="rag-toggle">
-      <input type="checkbox" id="rag-toggle" checked />
-      启用知识库检索
-    </label>
+    <div id="knowledge-content">
+      <div id="upload-progress" class="upload-progress">⏳ 正在处理…</div>
+      <div class="doc-list" id="doc-list"></div>
+      <label class="rag-toggle">
+        <input type="checkbox" id="rag-toggle" checked />
+        启用知识库检索
+      </label>
+    </div>
   </div>
 
   <!-- API数据源 -->
@@ -1596,15 +1633,20 @@ async function loadDocuments() {
 function renderDocList() {
   const list = document.getElementById('doc-list');
   const badge = document.getElementById('docs-badge');
-  badge.textContent = state.documents.length;
 
-  if (state.documents.length === 0) {
+  // 排除已归属某个 API 数据源的文档，只显示手动上传的
+  const apiDocIds = getApiSourceDocIds();
+  const uploadedDocs = state.documents.filter(d => !apiDocIds.has(d.doc_id));
+
+  badge.textContent = uploadedDocs.length;
+
+  if (uploadedDocs.length === 0) {
     list.innerHTML = `<div style="font-size:11px;color:var(--text-muted);padding:4px 4px 2px;text-align:center;">暂无文档，点击"添加文档"上传</div>`;
     return;
   }
 
   const icons = {pdf: '📄', txt: '📝', md: '📋', xlsx: '📊', xls: '📊'};
-  list.innerHTML = state.documents.map(doc => {
+  list.innerHTML = uploadedDocs.map(doc => {
     const isEmbedding = state.embeddingDocs.has(doc.doc_id);
     const embBadge = isEmbedding
       ? `<span class="doc-emb-badge loading" title="向量化中，请稍候…">向量化中…</span>`
@@ -1799,40 +1841,132 @@ function renderApiSourcesList() {
 
   if (state.apiSources.length === 0) {
     list.innerHTML = `<div style="font-size:11px;color:var(--text-muted);padding:4px 4px 2px;text-align:center;">暂无数据源，点击"添加数据源"配置</div>`;
+    renderDocList(); // 刷新 Knowledge（无数据源时显示全部文档）
     return;
   }
 
   list.innerHTML = state.apiSources.map(source => {
     const typeLabel = source.source_type === 'single' ? '单接口' : '列表+详情';
     const statusBadge = source.enabled
-      ? `<span class="doc-emb-badge ok" title="已启用">启用</span>`
-      : `<span class="doc-emb-badge no" title="已禁用">禁用</span>`;
+      ? `<span class="doc-emb-badge ok">启用</span>`
+      : `<span class="doc-emb-badge no">禁用</span>`;
+
+    // 获取该数据源对应的文档
+    const sourceDocs = getSourceDocs(source);
+    const docCount = sourceDocs.length;
+    const isCollapsed = localStorage.getItem(`qa-source-collapsed-${source.source_id}`) === '1';
+
+    // 子文档列表
+    const icons = {pdf: '📄', txt: '📝', md: '📋', xlsx: '📊', xls: '📊'};
+    const docsHtml = docCount > 0
+      ? sourceDocs.map(doc => {
+          const isEmbedding = state.embeddingDocs.has(doc.doc_id);
+          const embBadge = isEmbedding
+            ? `<span class="doc-emb-badge loading">向量化中…</span>`
+            : doc.has_embeddings
+              ? `<span class="doc-emb-badge ok">向量</span>`
+              : `<span class="doc-emb-badge no">TF-IDF</span>`;
+          const reEmbBtn = (!doc.has_embeddings && !isEmbedding) ? `
+            <button class="doc-re-embed" onclick="reEmbedDoc('${doc.doc_id}', this)" title="重新向量化">
+              <svg width="10" height="10" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-4.09"/>
+              </svg>
+            </button>` : '';
+          return `
+          <div class="api-source-doc-row">
+            <span style="font-size:12px;flex-shrink:0;">${icons[doc.file_type] || '📄'}</span>
+            <span style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${escapeHtml(doc.name)}">${escapeHtml(doc.name)}</span>
+            <span style="font-size:9px;color:var(--text-muted);flex-shrink:0;">${doc.chunk_count}块</span>
+            ${embBadge}
+            ${reEmbBtn}
+            <button class="doc-delete" onclick="deleteDoc('${doc.doc_id}')" title="删除">
+              <svg width="10" height="10" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+              </svg>
+            </button>
+          </div>`;
+        }).join('')
+      : `<div style="font-size:10px;color:var(--text-muted);padding:4px 2px;">暂无文档，点击 ↻ 同步</div>`;
 
     return `
-    <div class="doc-item" title="${escapeHtml(source.name)}">
-      <span class="doc-icon">🔗</span>
-      <span class="doc-name">${escapeHtml(source.name)}</span>
-      <span class="doc-chunks" style="font-size:9px;">${typeLabel}</span>
-      ${statusBadge}
-      <button class="doc-re-embed" onclick="syncApiSource('${source.source_id}')" title="同步数据">
-        <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-          <polyline points="23 4 23 10 17 10"/>
-          <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
-        </svg>
-      </button>
-      <button class="doc-re-embed" onclick="editApiSource('${source.source_id}')" title="编辑">
-        <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-        </svg>
-      </button>
-      <button class="doc-delete" onclick="deleteApiSource('${source.source_id}')" title="删除">
-        <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-        </svg>
-      </button>
+    <div class="api-source-group">
+      <div class="doc-item" style="cursor:default;">
+        <button class="section-chevron${isCollapsed ? ' collapsed' : ''}" onclick="toggleApiSource('${source.source_id}')" title="展开/折叠文档列表">
+          <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+            <polyline points="6 9 12 15 18 9"/>
+          </svg>
+        </button>
+        <span class="doc-icon">🔗</span>
+        <span class="doc-name" title="${escapeHtml(source.name)}">${escapeHtml(source.name)}</span>
+        <span class="doc-chunks" style="font-size:9px;">${typeLabel}</span>
+        ${docCount > 0 ? `<span class="doc-emb-badge" style="background:var(--bg-active);color:var(--text-muted)">${docCount}</span>` : ''}
+        ${statusBadge}
+        <button class="doc-re-embed" onclick="syncApiSource('${source.source_id}')" title="同步数据">
+          <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <polyline points="23 4 23 10 17 10"/>
+            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+          </svg>
+        </button>
+        <button class="doc-re-embed" onclick="editApiSource('${source.source_id}')" title="编辑">
+          <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+          </svg>
+        </button>
+        <button class="doc-delete" onclick="deleteApiSource('${source.source_id}')" title="删除">
+          <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+      <div class="api-source-docs-wrap${isCollapsed ? ' hidden' : ''}" id="api-source-docs-${source.source_id}">
+        ${docsHtml}
+      </div>
     </div>`;
   }).join('');
+
+  // 更新 Knowledge 区，过滤掉已归属数据源的文档
+  renderDocList();
+}
+
+// 返回属于某个数据源的文档列表
+function getSourceDocs(source) {
+  if (source.synced_doc_ids && source.synced_doc_ids.length > 0) {
+    const idSet = new Set(source.synced_doc_ids);
+    return state.documents.filter(d => idSet.has(d.doc_id));
+  }
+  // 兼容旧数据：按命名规则匹配（{source.name}_N.md）
+  const prefix = source.name + '_';
+  return state.documents.filter(d => d.name.startsWith(prefix) && d.name.endsWith('.md'));
+}
+
+// 返回所有 API 数据源文档的 doc_id 集合
+function getApiSourceDocIds() {
+  const ids = new Set();
+  for (const source of state.apiSources) {
+    getSourceDocs(source).forEach(d => ids.add(d.doc_id));
+  }
+  return ids;
+}
+
+// 切换单个 API 数据源的文档折叠
+function toggleApiSource(sourceId) {
+  const wrap = document.getElementById(`api-source-docs-${sourceId}`);
+  if (!wrap) return;
+  const chevron = wrap.previousElementSibling.querySelector('.section-chevron');
+  const isHidden = wrap.classList.toggle('hidden');
+  if (chevron) chevron.classList.toggle('collapsed', isHidden);
+  localStorage.setItem(`qa-source-collapsed-${sourceId}`, isHidden ? '1' : '0');
+}
+
+// 切换 Knowledge 区折叠
+function toggleKnowledge() {
+  const content = document.getElementById('knowledge-content');
+  const chevron = document.getElementById('knowledge-chevron');
+  if (!content) return;
+  const isHidden = content.classList.toggle('hidden-section');
+  if (chevron) chevron.classList.toggle('collapsed', isHidden);
+  localStorage.setItem('qa-knowledge-collapsed', isHidden ? '1' : '0');
 }
 
 async function syncApiSource(sourceId) {
@@ -2115,6 +2249,14 @@ function init() {
   loadDocuments();
   loadApiSources();
   if (state.embeddingDocs.size > 0) startEmbedPolling();
+
+  // 恢复 Knowledge 折叠状态
+  if (localStorage.getItem('qa-knowledge-collapsed') === '1') {
+    const content = document.getElementById('knowledge-content');
+    const chevron = document.getElementById('knowledge-chevron');
+    if (content) content.classList.add('hidden-section');
+    if (chevron) chevron.classList.add('collapsed');
+  }
 
   // If there's a saved active chat, render it; otherwise show welcome
   if (state.activeChatId && state.chats.find(c => c.id === state.activeChatId)) {

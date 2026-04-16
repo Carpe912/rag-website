@@ -49,6 +49,7 @@ class ApiSourceConfig:
     enabled: bool = True
     last_sync_time: Optional[str] = None
     last_sync_count: int = 0
+    synced_doc_ids: list[str] = field(default_factory=list)  # 最近一次同步生成的文档ID
 
 
 def _load_api_sources() -> dict:
@@ -417,10 +418,11 @@ async def sync_api_source(source_id: str) -> dict:
                 logger.error(f"[API Source] 入库失败 (索引={idx}): {e}")
                 continue
 
-        # 更新同步状态
+        # 更新同步状态（含本次生成的文档ID列表，供前端分组展示）
         update_api_source(source_id, {
             "last_sync_time": datetime.now().isoformat(),
             "last_sync_count": len(doc_ids),
+            "synced_doc_ids": doc_ids,
         })
 
         return {
