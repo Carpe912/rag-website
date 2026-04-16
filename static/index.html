@@ -979,6 +979,29 @@ textarea#chat-input::placeholder { color: var(--text-muted); }
     </label>
   </div>
 
+  <!-- API数据源 -->
+  <div class="docs-section">
+    <div class="docs-section-header">
+      <div class="docs-section-title">
+        <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+          <polyline points="3.27 6.96 12 12.01 20.73 6.96"/>
+          <line x1="12" y1="22.08" x2="12" y2="12"/>
+        </svg>
+        API数据源
+        <span class="docs-badge" id="api-sources-badge">0</span>
+      </div>
+      <button class="btn-upload" id="btn-add-api-source">
+        <svg width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+          <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+        </svg>
+        添加数据源
+      </button>
+    </div>
+
+    <div class="doc-list" id="api-sources-list"></div>
+  </div>
+
   <!-- 拖拽手柄 -->
   <div class="sidebar-resizer" id="sidebar-resizer"></div>
 </aside>
@@ -1053,6 +1076,7 @@ const state = {
   activeChatId: null,
   isStreaming: false,
   documents: [],      // from server
+  apiSources: [],     // API数据源列表
   abortController: null,
   embeddingDocs: new Set(),  // doc_ids 正在后台向量化
   embedPollTimer: null,      // 轮询定时器
@@ -1783,12 +1807,266 @@ function stopEmbedPolling() {
 }
 
 // ============================================================
+// API数据源管理
+// ============================================================
+async function loadApiSources() {
+  try {
+    const resp = await fetch(`${API_BASE}/api/sources`);
+    if (!resp.ok) return;
+    const data = await resp.json();
+    state.apiSources = data.sources || [];
+    renderApiSourcesList();
+  } catch (e) { /* offline, ignore */ }
+}
+
+function renderApiSourcesList() {
+  const list = document.getElementById('api-sources-list');
+  const badge = document.getElementById('api-sources-badge');
+  badge.textContent = state.apiSources.length;
+
+  if (state.apiSources.length === 0) {
+    list.innerHTML = `<div style="font-size:11px;color:var(--text-muted);padding:4px 4px 2px;text-align:center;">暂无数据源，点击"添加数据源"配置</div>`;
+    return;
+  }
+
+  list.innerHTML = state.apiSources.map(source => {
+    const typeLabel = source.source_type === 'single' ? '单接口' : '列表+详情';
+    const statusBadge = source.enabled
+      ? `<span class="doc-emb-badge ok" title="已启用">启用</span>`
+      : `<span class="doc-emb-badge no" title="已禁用">禁用</span>`;
+
+    return `
+    <div class="doc-item" title="${escapeHtml(source.name)}">
+      <span class="doc-icon">🔗</span>
+      <span class="doc-name">${escapeHtml(source.name)}</span>
+      <span class="doc-chunks" style="font-size:9px;">${typeLabel}</span>
+      ${statusBadge}
+      <button class="doc-re-embed" onclick="syncApiSource('${source.source_id}')" title="同步数据">
+        <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <polyline points="23 4 23 10 17 10"/>
+          <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+        </svg>
+      </button>
+      <button class="doc-delete" onclick="deleteApiSource('${source.source_id}')" title="删除">
+        <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+    </div>`;
+  }).join('');
+}
+
+async function syncApiSource(sourceId) {
+  try {
+    showToast('正在同步数据源...', 'info');
+    const resp = await fetch(`${API_BASE}/api/sources/${sourceId}/sync`, {method: 'POST'});
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || '同步失败');
+    showToast(data.message, 'success', 4000);
+    await loadDocuments();
+    if (data.doc_ids && data.doc_ids.length > 0) {
+      // 将新文档加入向量化追踪
+      data.doc_ids.forEach(id => state.embeddingDocs.add(id));
+      saveEmbeddingDocs();
+      startEmbedPolling();
+    }
+  } catch (err) {
+    showToast(err.message, 'error', 5000);
+  }
+}
+
+async function deleteApiSource(sourceId) {
+  if (!confirm('确定要删除此数据源吗？')) return;
+  try {
+    const resp = await fetch(`${API_BASE}/api/sources/${sourceId}`, {method: 'DELETE'});
+    if (!resp.ok) throw new Error('删除失败');
+    showToast('数据源已删除', 'info');
+    await loadApiSources();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+function showApiSourceDialog() {
+  const dialog = document.createElement('div');
+  dialog.style.cssText = `
+    position: fixed; inset: 0; z-index: 1000;
+    background: rgba(0,0,0,0.6); display: flex;
+    align-items: center; justify-content: center;
+    animation: fadeIn 0.2s ease;
+  `;
+
+  dialog.innerHTML = `
+    <div style="
+      background: var(--bg-secondary); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 20px; width: 90%; max-width: 500px;
+      box-shadow: var(--shadow); max-height: 90vh; overflow-y: auto;
+    ">
+      <h3 style="margin: 0 0 16px; font-size: 16px; color: var(--text-primary);">添加API数据源</h3>
+
+      <div style="margin-bottom: 12px;">
+        <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">数据源名称</label>
+        <input id="source-name" type="text" placeholder="例如：帮助中心文档" style="
+          width: 100%; padding: 8px; background: var(--bg-primary); border: 1px solid var(--border);
+          border-radius: var(--radius-sm); color: var(--text-primary); font-size: 13px;
+        "/>
+      </div>
+
+      <div style="margin-bottom: 12px;">
+        <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">接口类型</label>
+        <select id="source-type" style="
+          width: 100%; padding: 8px; background: var(--bg-primary); border: 1px solid var(--border);
+          border-radius: var(--radius-sm); color: var(--text-primary); font-size: 13px;
+        ">
+          <option value="single">单接口模式</option>
+          <option value="list_detail">列表+详情模式</option>
+        </select>
+      </div>
+
+      <div id="single-mode-fields">
+        <div style="margin-bottom: 12px;">
+          <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">API地址</label>
+          <input id="api-url" type="text" placeholder="https://api.example.com/content" style="
+            width: 100%; padding: 8px; background: var(--bg-primary); border: 1px solid var(--border);
+            border-radius: var(--radius-sm); color: var(--text-primary); font-size: 13px;
+          "/>
+        </div>
+        <div style="margin-bottom: 12px;">
+          <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">内容字段路径</label>
+          <input id="content-path" type="text" placeholder="例如：results.content" style="
+            width: 100%; padding: 8px; background: var(--bg-primary); border: 1px solid var(--border);
+            border-radius: var(--radius-sm); color: var(--text-primary); font-size: 13px;
+          "/>
+          <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">支持嵌套：field.subfield 或数组：field[].id</div>
+        </div>
+      </div>
+
+      <div id="list-detail-mode-fields" style="display: none;">
+        <div style="margin-bottom: 12px;">
+          <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">列表接口地址</label>
+          <input id="list-api-url" type="text" placeholder="https://api.example.com/list" style="
+            width: 100%; padding: 8px; background: var(--bg-primary); border: 1px solid var(--border);
+            border-radius: var(--radius-sm); color: var(--text-primary); font-size: 13px;
+          "/>
+        </div>
+        <div style="margin-bottom: 12px;">
+          <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">ID字段路径</label>
+          <input id="list-id-path" type="text" placeholder="例如：results[].id" style="
+            width: 100%; padding: 8px; background: var(--bg-primary); border: 1px solid var(--border);
+            border-radius: var(--radius-sm); color: var(--text-primary); font-size: 13px;
+          "/>
+        </div>
+        <div style="margin-bottom: 12px;">
+          <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">详情接口地址模板</label>
+          <input id="detail-api-url" type="text" placeholder="https://api.example.com/detail/{id}" style="
+            width: 100%; padding: 8px; background: var(--bg-primary); border: 1px solid var(--border);
+            border-radius: var(--radius-sm); color: var(--text-primary); font-size: 13px;
+          "/>
+          <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">使用 {id} 作为占位符</div>
+        </div>
+        <div style="margin-bottom: 12px;">
+          <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">详情内容字段路径</label>
+          <input id="detail-content-path" type="text" placeholder="例如：results.content" style="
+            width: 100%; padding: 8px; background: var(--bg-primary); border: 1px solid var(--border);
+            border-radius: var(--radius-sm); color: var(--text-primary); font-size: 13px;
+          "/>
+        </div>
+      </div>
+
+      <div style="display: flex; gap: 8px; margin-top: 16px;">
+        <button id="btn-save-source" style="
+          flex: 1; padding: 8px; background: var(--accent); color: white; border: none;
+          border-radius: var(--radius-sm); font-size: 13px; cursor: pointer;
+        ">保存</button>
+        <button id="btn-cancel-source" style="
+          flex: 1; padding: 8px; background: var(--bg-hover); color: var(--text-primary); border: none;
+          border-radius: var(--radius-sm); font-size: 13px; cursor: pointer;
+        ">取消</button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(dialog);
+
+  // 切换模式显示不同字段
+  const typeSelect = dialog.querySelector('#source-type');
+  const singleFields = dialog.querySelector('#single-mode-fields');
+  const listDetailFields = dialog.querySelector('#list-detail-mode-fields');
+
+  typeSelect.onchange = () => {
+    if (typeSelect.value === 'single') {
+      singleFields.style.display = 'block';
+      listDetailFields.style.display = 'none';
+    } else {
+      singleFields.style.display = 'none';
+      listDetailFields.style.display = 'block';
+    }
+  };
+
+  dialog.querySelector('#btn-cancel-source').onclick = () => dialog.remove();
+  dialog.querySelector('#btn-save-source').onclick = async () => {
+    const name = dialog.querySelector('#source-name').value.trim();
+    const sourceType = dialog.querySelector('#source-type').value;
+
+    if (!name) {
+      showToast('请输入数据源名称', 'error');
+      return;
+    }
+
+    const payload = {
+      name,
+      source_type: sourceType,
+      method: 'GET',
+      timeout: 30,
+    };
+
+    if (sourceType === 'single') {
+      payload.api_url = dialog.querySelector('#api-url').value.trim();
+      payload.content_path = dialog.querySelector('#content-path').value.trim();
+      if (!payload.api_url || !payload.content_path) {
+        showToast('请填写完整的单接口配置', 'error');
+        return;
+      }
+    } else {
+      payload.list_api_url = dialog.querySelector('#list-api-url').value.trim();
+      payload.list_id_path = dialog.querySelector('#list-id-path').value.trim();
+      payload.detail_api_url = dialog.querySelector('#detail-api-url').value.trim();
+      payload.detail_content_path = dialog.querySelector('#detail-content-path').value.trim();
+      if (!payload.list_api_url || !payload.list_id_path || !payload.detail_api_url || !payload.detail_content_path) {
+        showToast('请填写完整的列表+详情配置', 'error');
+        return;
+      }
+    }
+
+    try {
+      const resp = await fetch(`${API_BASE}/api/sources`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.detail || '创建失败');
+      showToast('数据源创建成功', 'success');
+      dialog.remove();
+      await loadApiSources();
+    } catch (err) {
+      showToast(err.message, 'error', 5000);
+    }
+  };
+
+  dialog.onclick = (e) => {
+    if (e.target === dialog) dialog.remove();
+  };
+}
+
+// ============================================================
 // Event listeners
 // ============================================================
 function init() {
   loadChats();
   loadEmbeddingDocs();
   loadDocuments();
+  loadApiSources();
   if (state.embeddingDocs.size > 0) startEmbedPolling();
 
   // If there's a saved active chat, render it; otherwise show welcome
@@ -1840,6 +2118,12 @@ function init() {
   };
   document.getElementById('file-input').onchange = e => {
     if (e.target.files[0]) uploadFile(e.target.files[0]);
+  };
+
+  // API数据源
+  document.getElementById('btn-add-api-source').onclick = (e) => {
+    e.stopPropagation();
+    showApiSourceDialog();
   };
 
   // Mobile menu

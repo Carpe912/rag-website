@@ -36,6 +36,15 @@ from rag import (
     Document,
 )
 
+from api_source import (
+    ApiSourceConfig,
+    get_api_sources,
+    add_api_source,
+    update_api_source,
+    delete_api_source,
+    sync_api_source,
+)
+
 load_dotenv()
 
 logger = logging.getLogger(__name__)
@@ -438,4 +447,109 @@ async def chroma_reset_endpoint():
     """
     deleted = chroma_reset()
     return {"message": f"已清空 Chroma 集合，共删除 {deleted} 条记录。", "deleted": deleted}
+
+
+# ---------------------------------------------------------------------------
+# API数据源管理接口
+# ---------------------------------------------------------------------------
+
+@app.get("/api/sources")
+async def list_api_sources():
+    """获取所有API数据源配置"""
+    return {"sources": get_api_sources()}
+
+
+class ApiSourceCreateRequest(BaseModel):
+    name: str
+    source_type: str
+    api_url: str = ""
+    content_path: str = ""
+    list_api_url: str = ""
+    list_id_path: str = ""
+    detail_api_url: str = ""
+    detail_content_path: str = ""
+    method: str = "GET"
+    headers: dict[str, str] = {}
+    timeout: int = 30
+
+
+@app.post("/api/sources")
+async def create_api_source(request: ApiSourceCreateRequest):
+    """
+    创建新的API数据源配置
+
+    source_type:
+    - "single": 单接口模式，直接从api_url获取内容
+    - "list_detail": 列表+详情模式，先从list_api_url获取ID列表，再逐个调用detail_api_url
+    """
+    import uuid
+
+    if request.source_type not in ["single", "list_detail"]:
+        raise HTTPException(status_code=400, detail="source_type 必须是 'single' 或 'list_detail'")
+
+    if request.source_type == "single" and (not request.api_url or not request.content_path):
+        raise HTTPException(status_code=400, detail="单接口模式需要提供 api_url 和 content_path")
+
+    if request.source_type == "list_detail" and (not request.list_api_url or not request.list_id_path or not request.detail_api_url or not request.detail_content_path):
+        raise HTTPException(status_code=400, detail="列表+详情模式需要提供 list_api_url, list_id_path, detail_api_url, detail_content_path")
+
+    config = ApiSourceConfig(
+        source_id=str(uuid.uuid4()),
+        name=request.name,
+        source_type=request.source_type,
+        api_url=request.api_url,
+        content_path=request.content_path,
+        list_api_url=request.list_api_url,
+        list_id_path=request.list_id_path,
+        detail_api_url=request.detail_api_url,
+        detail_content_path=request.detail_content_path,
+        method=request.method,
+        headers=request.headers,
+        timeout=request.timeout,
+    )
+
+    try:
+        add_api_source(config)
+        return {"message": "API数据源创建成功", "source_id": config.source_id}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.put("/api/sources/{source_id}")
+async def update_api_source_endpoint(source_id: str, updates: dict):
+    """更新API数据源配置"""
+    if not update_api_source(source_id, updates):
+        raise HTTPException(status_code=404, detail="数据源不存在")
+    return {"message": "更新成功", "source_id": source_id}
+
+
+@app.delete("/api/sources/{source_id}")
+async def delete_api_source_endpoint(source_id: str):
+    """删除API数据源"""
+    if not delete_api_source(source_id):
+        raise HTTPException(status_code=404, detail="数据源不存在")
+    return {"message": "删除成功", "source_id": source_id}
+
+
+@app.post("/api/sources/{source_id}/sync")
+async def sync_api_source_endpoint(source_id: str):
+    """
+    同步API数据源，获取数据并向量化入库
+    返回后台异步执行，前端可轮询文档列表查看进度
+    """
+    result = await sync_api_source(source_id)
+
+    if not result["success"]:
+        raise HTTPException(status_code=500, detail=result["error"])
+
+    # 对所有新文档启动后台向量化
+    if _embedding_available():
+        for doc_id in result["doc_ids"]:
+            asyncio.create_task(_bg_embed(doc_id))
+
+    return {
+        "message": f"成功导入 {result['count']} 条内容，向量化进行中…",
+        "count": result["count"],
+        "doc_ids": result["doc_ids"],
+    }
 
