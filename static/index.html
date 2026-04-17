@@ -1650,7 +1650,7 @@ function renderDocList() {
   badge.textContent = uploadedDocs.length;
 
   if (uploadedDocs.length === 0) {
-    list.innerHTML = `<div style="font-size:11px;color:var(--text-muted);padding:4px 4px 2px;text-align:center;">暂无文档，点击"添加文档"上传</div>`;
+    list.innerHTML = `<div style="font-size:11px;color:var(--text-muted);padding:8px 6px;text-align:center;">暂无文档<br>点击上方"添加文档"上传</div>`;
     return;
   }
 
@@ -1856,7 +1856,7 @@ function renderApiSourcesList() {
   badge.textContent = state.apiSources.length;
 
   if (state.apiSources.length === 0) {
-    list.innerHTML = `<div style="font-size:11px;color:var(--text-muted);padding:4px 4px 2px;text-align:center;">暂无数据源，点击"添加数据源"配置</div>`;
+    list.innerHTML = `<div style="font-size:11px;color:var(--text-muted);padding:8px 6px;text-align:center;">暂无数据源<br>点击上方"添加数据源"配置</div>`;
     renderDocList(); // 刷新 Knowledge（无数据源时显示全部文档）
     return;
   }
@@ -1902,7 +1902,7 @@ function renderApiSourcesList() {
             </button>
           </div>`;
         }).join('')
-      : `<div style="font-size:10px;color:var(--text-muted);padding:4px 2px;">暂无文档，点击 ↻ 同步</div>`;
+      : `<div style="font-size:10px;color:var(--text-muted);padding:6px 8px;text-align:center;">暂无文档<br>点击 ↻ 同步数据</div>`;
 
     return `
     <div class="api-source-group">
