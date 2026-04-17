@@ -1639,7 +1639,8 @@ async function loadDocuments() {
     }
     if (anyCleared) saveEmbeddingDocs();
 
-    renderDocList();
+    // 不在这里渲染，等 loadApiSources 完成后统一渲染
+    // renderDocList();
   } catch (e) { /* offline, ignore */ }
 }
 
@@ -1883,7 +1884,7 @@ function renderApiSourcesList() {
       if (chevron) chevron.classList.add('collapsed');
       localStorage.setItem('qa-api-sources-collapsed', '1');
     }
-    renderDocList(); // 刷新 Knowledge（无数据源时显示全部文档）
+    // 移除这里的 renderDocList()，统一在外部调用
     return;
   }
 
@@ -1926,8 +1927,7 @@ function renderApiSourcesList() {
     </div>`;
   }).join('');
 
-  // 更新 Knowledge 区，过滤掉已归属数据源的文档
-  renderDocList();
+  // 移除这里的 renderDocList()，统一在外部调用
 }
 
 // 返回属于某个数据源的文档列表
@@ -2341,8 +2341,13 @@ function showApiSourceDialog(editSource = null) {
 function init() {
   loadChats();
   loadEmbeddingDocs();
-  loadDocuments();
-  loadApiSources();
+
+  // 先加载文档和数据源，再统一渲染
+  Promise.all([loadDocuments(), loadApiSources()]).then(() => {
+    renderDocList();
+    renderApiSourcesList();
+  });
+
   if (state.embeddingDocs.size > 0) startEmbedPolling();
 
   // 恢复 Knowledge 折叠状态
