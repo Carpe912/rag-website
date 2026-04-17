@@ -1646,6 +1646,8 @@ async function loadDocuments() {
 function renderDocList() {
   const list = document.getElementById('doc-list');
   const badge = document.getElementById('docs-badge');
+  const content = document.getElementById('knowledge-content');
+  const chevron = document.getElementById('knowledge-chevron');
 
   // 排除已归属某个 API 数据源的文档，只显示手动上传的
   const apiDocIds = getApiSourceDocIds();
@@ -1653,8 +1655,14 @@ function renderDocList() {
 
   badge.textContent = uploadedDocs.length;
 
+  // 如果没有文档，自动折叠
   if (uploadedDocs.length === 0) {
     list.innerHTML = `<div style="font-size:11px;color:var(--text-muted);padding:8px 6px;text-align:center;">暂无文档<br>点击上方"添加文档"上传</div>`;
+    if (content && !content.classList.contains('hidden-section')) {
+      content.classList.add('hidden-section');
+      if (chevron) chevron.classList.add('collapsed');
+      localStorage.setItem('qa-knowledge-collapsed', '1');
+    }
     return;
   }
 
@@ -1857,19 +1865,25 @@ async function loadApiSources() {
 function renderApiSourcesList() {
   const list = document.getElementById('api-sources-list');
   const badge = document.getElementById('api-sources-badge');
+  const apiList = document.getElementById('api-sources-list');
+  const chevron = document.getElementById('api-sources-chevron');
+
   badge.textContent = state.apiSources.length;
 
   if (state.apiSources.length === 0) {
     list.innerHTML = `<div style="font-size:11px;color:var(--text-muted);padding:8px 6px;text-align:center;">暂无数据源<br>点击上方"添加数据源"配置</div>`;
+    // 如果没有数据源，自动折叠
+    if (apiList && !apiList.classList.contains('hidden-section')) {
+      apiList.classList.add('hidden-section');
+      if (chevron) chevron.classList.add('collapsed');
+      localStorage.setItem('qa-api-sources-collapsed', '1');
+    }
     renderDocList(); // 刷新 Knowledge（无数据源时显示全部文档）
     return;
   }
 
   list.innerHTML = state.apiSources.map(source => {
     const typeLabel = source.source_type === 'single' ? '单接口' : '列表+详情';
-    const statusBadge = source.enabled
-      ? `<span class="doc-emb-badge ok">启用</span>`
-      : `<span class="doc-emb-badge no">禁用</span>`;
 
     // 获取该数据源对应的文档
     const sourceDocs = getSourceDocs(source);
@@ -1880,8 +1894,7 @@ function renderApiSourcesList() {
       <span class="doc-icon">🔗</span>
       <span class="doc-name" title="${escapeHtml(source.name)}">${escapeHtml(source.name)}</span>
       <span class="doc-chunks" style="font-size:9px;">${typeLabel}</span>
-      ${docCount > 0 ? `<span class="doc-emb-badge" style="background:var(--bg-active);color:var(--text-muted)">${docCount}</span>` : ''}
-      ${statusBadge}
+      <span class="doc-emb-badge" style="background:var(--bg-active);color:var(--text-secondary)">${docCount}</span>
       <button class="doc-re-embed" onclick="viewApiSourceDocs('${source.source_id}')" title="查看文档">
         <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
           <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
