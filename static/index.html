@@ -897,6 +897,12 @@ textarea#chat-input::placeholder { color: var(--text-muted); }
 
 /* API Source 折叠子文档区 */
 .api-source-group { display: flex; flex-direction: column; }
+.api-source-group .section-chevron {
+  background: none !important;
+  border: none !important;
+  padding: 2px;
+  margin: 0;
+}
 .api-source-docs-wrap {
   display: flex; flex-direction: column; gap: 2px;
   margin: 2px 0 4px 18px;
@@ -991,7 +997,7 @@ textarea#chat-input::placeholder { color: var(--text-muted); }
           <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
           <polyline points="14 2 14 8 20 8"/>
         </svg>
-        Knowledge
+        知识库
         <span class="docs-badge" id="docs-badge">0</span>
         <svg id="knowledge-chevron" class="section-chevron" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
           <polyline points="6 9 12 15 18 9"/>
@@ -1019,7 +1025,7 @@ textarea#chat-input::placeholder { color: var(--text-muted); }
   <!-- API数据源 -->
   <div class="docs-section">
     <div class="docs-section-header">
-      <div class="docs-section-title">
+      <div class="docs-section-title" onclick="toggleApiSourcesSection()" title="展开/折叠">
         <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
           <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
           <polyline points="3.27 6.96 12 12.01 20.73 6.96"/>
@@ -1027,6 +1033,9 @@ textarea#chat-input::placeholder { color: var(--text-muted); }
         </svg>
         API数据源
         <span class="docs-badge" id="api-sources-badge">0</span>
+        <svg id="api-sources-chevron" class="section-chevron" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+          <polyline points="6 9 12 15 18 9"/>
+        </svg>
       </div>
       <button class="btn-upload" id="btn-add-api-source">
         <svg width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
@@ -1734,6 +1743,10 @@ async function deleteDoc(docId) {
     showToast('向量化进行中，请稍候再删除', 'error');
     return;
   }
+  // 防连点：禁用所有删除按钮
+  const deleteButtons = document.querySelectorAll('.doc-delete');
+  deleteButtons.forEach(btn => btn.disabled = true);
+
   try {
     const resp = await fetch(`${API_BASE}/api/documents/${docId}`, {method: 'DELETE'});
     if (!resp.ok) throw new Error('删除失败');
@@ -1742,6 +1755,9 @@ async function deleteDoc(docId) {
     await loadDocuments();
   } catch (err) {
     showToast(err.message, 'error');
+  } finally {
+    // 恢复按钮状态
+    deleteButtons.forEach(btn => btn.disabled = false);
   }
 }
 
@@ -1967,6 +1983,16 @@ function toggleKnowledge() {
   const isHidden = content.classList.toggle('hidden-section');
   if (chevron) chevron.classList.toggle('collapsed', isHidden);
   localStorage.setItem('qa-knowledge-collapsed', isHidden ? '1' : '0');
+}
+
+// 切换 API数据源区折叠
+function toggleApiSourcesSection() {
+  const list = document.getElementById('api-sources-list');
+  const chevron = document.getElementById('api-sources-chevron');
+  if (!list) return;
+  const isHidden = list.classList.toggle('hidden-section');
+  if (chevron) chevron.classList.toggle('collapsed', isHidden);
+  localStorage.setItem('qa-api-sources-collapsed', isHidden ? '1' : '0');
 }
 
 async function syncApiSource(sourceId) {
@@ -2255,6 +2281,14 @@ function init() {
     const content = document.getElementById('knowledge-content');
     const chevron = document.getElementById('knowledge-chevron');
     if (content) content.classList.add('hidden-section');
+    if (chevron) chevron.classList.add('collapsed');
+  }
+
+  // 恢复 API数据源区折叠状态
+  if (localStorage.getItem('qa-api-sources-collapsed') === '1') {
+    const list = document.getElementById('api-sources-list');
+    const chevron = document.getElementById('api-sources-chevron');
+    if (list) list.classList.add('hidden-section');
     if (chevron) chevron.classList.add('collapsed');
   }
 
