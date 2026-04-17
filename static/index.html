@@ -2052,6 +2052,10 @@ function toggleApiSourcesSection() {
 }
 
 async function syncApiSource(sourceId) {
+  // 防连点：禁用所有同步按钮
+  const syncButtons = document.querySelectorAll('.doc-re-embed[onclick*="syncApiSource"]');
+  syncButtons.forEach(btn => btn.disabled = true);
+
   try {
     showToast('正在同步数据源...', 'info');
     const resp = await fetch(`${API_BASE}/api/sources/${sourceId}/sync`, {method: 'POST'});
@@ -2059,6 +2063,7 @@ async function syncApiSource(sourceId) {
     if (!resp.ok) throw new Error(data.detail || '同步失败');
     showToast(data.message, 'success', 4000);
     await loadDocuments();
+    await loadApiSources();  // 重新加载数据源列表，更新文档数
     if (data.doc_ids && data.doc_ids.length > 0) {
       // 将新文档加入向量化追踪
       data.doc_ids.forEach(id => state.embeddingDocs.add(id));
@@ -2067,6 +2072,9 @@ async function syncApiSource(sourceId) {
     }
   } catch (err) {
     showToast(err.message, 'error', 5000);
+  } finally {
+    // 恢复按钮状态
+    syncButtons.forEach(btn => btn.disabled = false);
   }
 }
 
