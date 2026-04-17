@@ -71,16 +71,44 @@ async def _bg_embed_batch(doc_ids: list[str]) -> None:
     """顺序向量化多个文档，避免并发请求触发 Embedding API 限流。"""
     loop = asyncio.get_running_loop()
     total = len(doc_ids)
+    success_count = 0
+    fail_count = 0
+
     for i, doc_id in enumerate(doc_ids, 1):
-        try:
-            logger.info(f"[Embed] 向量化进度 {i}/{total}，doc_id={doc_id}")
-            ok = await loop.run_in_executor(None, re_embed_document, doc_id)
-            if ok:
-                logger.info(f"[Embed] 文档 {doc_id} 向量化完成 ({i}/{total})")
-            else:
-                logger.warning(f"[Embed] 文档 {doc_id} 向量化失败（re_embed_document 返回 False）")
-        except Exception as exc:
-            logger.error(f"[Embed] 文档 {doc_id} 向量化异常: {exc}")
+        retry = 0
+        max_retries = 3
+        while retry < max_retries:
+            try:
+                logger.info(f"[Embed] 向量化进度 {i}/{total}，doc_id={doc_id}，尝试 {retry + 1}/{max_retries}")
+                ok = await loop.run_in_executor(None, re_embed_document, doc_id)
+                if ok:
+                    success_count += 1
+                    logger.info(f"[Embed] ✅ 文档 {doc_id} 向量化完成 ({i}/{total})")
+                    break  # 成功，跳出重试循环
+                else:
+                    retry += 1
+                    if retry < max_retries:
+                        wait_time = 2 ** retry  # 指数退避：2s, 4s, 8s
+                        logger.warning(f"[Embed] 文档 {doc_id} 向量化失败，{wait_time}秒后重试...")
+                        await asyncio.sleep(wait_time)
+                    else:
+                        fail_count += 1
+                        logger.error(f"[Embed] ❌ 文档 {doc_id} 向量化失败（已重试{max_retries}次）")
+            except Exception as exc:
+                retry += 1
+                if retry < max_retries:
+                    wait_time = 2 ** retry
+                    logger.warning(f"[Embed] 文档 {doc_id} 向量化异常: {exc}，{wait_time}秒后重试...")
+                    await asyncio.sleep(wait_time)
+                else:
+                    fail_count += 1
+                    logger.error(f"[Embed] ❌ 文档 {doc_id} 向量化异常（已重试{max_retries}次）: {exc}")
+
+        # 每个文档之间间隔0.5秒，进一步降低API压力
+        if i < total:
+            await asyncio.sleep(0.5)
+
+    logger.info(f"[Embed] 批量向量化完成：成功 {success_count}/{total}，失败 {fail_count}/{total}")
 
 # ---------------------------------------------------------------------------
 # App setup

@@ -989,6 +989,14 @@ textarea#chat-input::placeholder { color: var(--text-muted); }
   <!-- Chat History -->
   <div class="chat-history-section" id="chat-history"></div>
 
+  <!-- RAG Toggle (全局控制) -->
+  <div style="padding:8px 8px 4px;border-bottom:1px solid var(--border);">
+    <label class="rag-toggle">
+      <input type="checkbox" id="rag-toggle" checked />
+      启用知识库检索
+    </label>
+  </div>
+
   <!-- Knowledge Base -->
   <div class="docs-section">
     <div class="docs-section-header">
@@ -1015,10 +1023,6 @@ textarea#chat-input::placeholder { color: var(--text-muted); }
     <div id="knowledge-content">
       <div id="upload-progress" class="upload-progress">⏳ 正在处理…</div>
       <div class="doc-list" id="doc-list"></div>
-      <label class="rag-toggle">
-        <input type="checkbox" id="rag-toggle" checked />
-        启用知识库检索
-      </label>
     </div>
   </div>
 
@@ -1870,74 +1874,37 @@ function renderApiSourcesList() {
     // 获取该数据源对应的文档
     const sourceDocs = getSourceDocs(source);
     const docCount = sourceDocs.length;
-    const isCollapsed = localStorage.getItem(`qa-source-collapsed-${source.source_id}`) === '1';
-
-    // 子文档列表
-    const icons = {pdf: '📄', txt: '📝', md: '📋', xlsx: '📊', xls: '📊'};
-    const docsHtml = docCount > 0
-      ? sourceDocs.map(doc => {
-          const isEmbedding = state.embeddingDocs.has(doc.doc_id);
-          const embBadge = isEmbedding
-            ? `<span class="doc-emb-badge loading">向量化中…</span>`
-            : doc.has_embeddings
-              ? `<span class="doc-emb-badge ok">向量</span>`
-              : `<span class="doc-emb-badge no">TF-IDF</span>`;
-          const reEmbBtn = (!doc.has_embeddings && !isEmbedding) ? `
-            <button class="doc-re-embed" onclick="reEmbedDoc('${doc.doc_id}', this)" title="重新向量化">
-              <svg width="10" height="10" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                <polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-4.09"/>
-              </svg>
-            </button>` : '';
-          return `
-          <div class="api-source-doc-row">
-            <span style="font-size:12px;flex-shrink:0;">${icons[doc.file_type] || '📄'}</span>
-            <span style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${escapeHtml(doc.name)}">${escapeHtml(doc.name)}</span>
-            <span style="font-size:9px;color:var(--text-muted);flex-shrink:0;">${doc.chunk_count}块</span>
-            ${embBadge}
-            ${reEmbBtn}
-            <button class="doc-delete" onclick="deleteDoc('${doc.doc_id}')" title="删除">
-              <svg width="10" height="10" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-              </svg>
-            </button>
-          </div>`;
-        }).join('')
-      : `<div style="font-size:10px;color:var(--text-muted);padding:6px 8px;text-align:center;">暂无文档<br>点击 ↻ 同步数据</div>`;
 
     return `
-    <div class="api-source-group">
-      <div class="doc-item" style="cursor:default;">
-        <button class="section-chevron${isCollapsed ? ' collapsed' : ''}" onclick="toggleApiSource('${source.source_id}')" title="展开/折叠文档列表">
-          <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
-            <polyline points="6 9 12 15 18 9"/>
-          </svg>
-        </button>
-        <span class="doc-icon">🔗</span>
-        <span class="doc-name" title="${escapeHtml(source.name)}">${escapeHtml(source.name)}</span>
-        <span class="doc-chunks" style="font-size:9px;">${typeLabel}</span>
-        ${docCount > 0 ? `<span class="doc-emb-badge" style="background:var(--bg-active);color:var(--text-muted)">${docCount}</span>` : ''}
-        ${statusBadge}
-        <button class="doc-re-embed" onclick="syncApiSource('${source.source_id}')" title="同步数据">
-          <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-            <polyline points="23 4 23 10 17 10"/>
-            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
-          </svg>
-        </button>
-        <button class="doc-re-embed" onclick="editApiSource('${source.source_id}')" title="编辑">
-          <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-          </svg>
-        </button>
-        <button class="doc-delete" onclick="deleteApiSource('${source.source_id}')" title="删除">
-          <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-          </svg>
-        </button>
-      </div>
-      <div class="api-source-docs-wrap${isCollapsed ? ' hidden' : ''}" id="api-source-docs-${source.source_id}">
-        ${docsHtml}
-      </div>
+    <div class="doc-item">
+      <span class="doc-icon">🔗</span>
+      <span class="doc-name" title="${escapeHtml(source.name)}">${escapeHtml(source.name)}</span>
+      <span class="doc-chunks" style="font-size:9px;">${typeLabel}</span>
+      ${docCount > 0 ? `<span class="doc-emb-badge" style="background:var(--bg-active);color:var(--text-muted)">${docCount}</span>` : ''}
+      ${statusBadge}
+      <button class="doc-re-embed" onclick="viewApiSourceDocs('${source.source_id}')" title="查看文档">
+        <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+          <circle cx="12" cy="12" r="3"/>
+        </svg>
+      </button>
+      <button class="doc-re-embed" onclick="syncApiSource('${source.source_id}')" title="同步数据">
+        <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <polyline points="23 4 23 10 17 10"/>
+          <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+        </svg>
+      </button>
+      <button class="doc-re-embed" onclick="editApiSource('${source.source_id}')" title="编辑">
+        <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+        </svg>
+      </button>
+      <button class="doc-delete" onclick="deleteApiSource('${source.source_id}')" title="删除">
+        <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
     </div>`;
   }).join('');
 
@@ -1973,6 +1940,82 @@ function toggleApiSource(sourceId) {
   const isHidden = wrap.classList.toggle('hidden');
   if (chevron) chevron.classList.toggle('collapsed', isHidden);
   localStorage.setItem(`qa-source-collapsed-${sourceId}`, isHidden ? '1' : '0');
+}
+
+// 查看 API 数据源的文档列表（弹窗）
+function viewApiSourceDocs(sourceId) {
+  const source = state.apiSources.find(s => s.source_id === sourceId);
+  if (!source) return;
+
+  const sourceDocs = getSourceDocs(source);
+  const icons = {pdf: '📄', txt: '📝', md: '📋', xlsx: '📊', xls: '📊'};
+
+  const dialog = document.createElement('div');
+  dialog.style.cssText = `
+    position: fixed; inset: 0; z-index: 1000;
+    background: rgba(0,0,0,0.6); display: flex;
+    align-items: center; justify-content: center;
+    animation: fadeIn 0.2s ease;
+  `;
+
+  const docsHtml = sourceDocs.length > 0
+    ? sourceDocs.map(doc => {
+        const isEmbedding = state.embeddingDocs.has(doc.doc_id);
+        const embBadge = isEmbedding
+          ? `<span class="doc-emb-badge loading">向量化中…</span>`
+          : doc.has_embeddings
+            ? `<span class="doc-emb-badge ok">向量</span>`
+            : `<span class="doc-emb-badge no">TF-IDF</span>`;
+        const reEmbBtn = (!doc.has_embeddings && !isEmbedding) ? `
+          <button class="doc-re-embed" onclick="reEmbedDoc('${doc.doc_id}', this)" title="重新向量化">
+            <svg width="10" height="10" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-4.09"/>
+            </svg>
+          </button>` : '';
+        return `
+        <div class="doc-item" style="margin-bottom:4px;">
+          <span class="doc-icon">${icons[doc.file_type] || '📄'}</span>
+          <span class="doc-name" title="${escapeHtml(doc.name)}">${escapeHtml(doc.name)}</span>
+          <span class="doc-chunks">${doc.chunk_count}块</span>
+          ${embBadge}
+          ${reEmbBtn}
+          <button class="doc-delete" onclick="deleteDoc('${doc.doc_id}')" title="删除">
+            <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          </button>
+        </div>`;
+      }).join('')
+    : `<div style="font-size:12px;color:var(--text-muted);padding:20px;text-align:center;">暂无文档<br>点击数据源的 ↻ 按钮同步数据</div>`;
+
+  dialog.innerHTML = `
+    <div style="
+      background: var(--bg-secondary); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 20px; width: 90%; max-width: 600px;
+      box-shadow: var(--shadow); max-height: 80vh; display: flex; flex-direction: column;
+    ">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+        <h3 style="margin:0;font-size:16px;color:var(--text-primary);">📄 ${escapeHtml(source.name)}</h3>
+        <button onclick="this.closest('div[style*=fixed]').remove()" style="
+          background:none;border:none;color:var(--text-muted);cursor:pointer;
+          padding:4px;display:flex;align-items:center;
+        ">
+          <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+      <div style="font-size:12px;color:var(--text-secondary);margin-bottom:12px;">
+        共 ${sourceDocs.length} 个文档
+      </div>
+      <div style="flex:1;overflow-y:auto;min-height:200px;">
+        ${docsHtml}
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(dialog);
+  dialog.onclick = (e) => { if (e.target === dialog) dialog.remove(); };
 }
 
 // 切换 Knowledge 区折叠
