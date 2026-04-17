@@ -1653,6 +1653,11 @@ function renderDocList() {
   const apiDocIds = getApiSourceDocIds();
   const uploadedDocs = state.documents.filter(d => !apiDocIds.has(d.doc_id));
 
+  // 调试日志
+  console.log('[Debug] 总文档数:', state.documents.length);
+  console.log('[Debug] API数据源文档ID集合:', Array.from(apiDocIds));
+  console.log('[Debug] 过滤后的上传文档数:', uploadedDocs.length);
+
   badge.textContent = uploadedDocs.length;
 
   // 如果没有文档，自动折叠
