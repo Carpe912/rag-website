@@ -53,7 +53,7 @@ ENABLE_HYBRID_SEARCH = os.getenv("ENABLE_HYBRID_SEARCH", "true").lower() == "tru
 ENABLE_QUERY_REWRITE = os.getenv("ENABLE_QUERY_REWRITE", "true").lower() == "true"
 ENABLE_RERANKER = os.getenv("ENABLE_RERANKER", "true").lower() == "true"
 ENABLE_PARENT_CHILD = os.getenv("ENABLE_PARENT_CHILD", "false").lower() == "true"
-RERANKER_MODEL = os.getenv("RERANKER_MODEL", "BAAI/bge-reranker-v2-m3")
+RERANKER_MODEL = os.getenv("RERANKER_MODEL", "qwen3-rerank")
 RERANKER_TOP_K = int(os.getenv("RERANKER_TOP_K", "5"))
 PARENT_CHUNK_SIZE = 1500  # 父块大小
 CHILD_CHUNK_SIZE = 500    # 子块大小（用于检索）
@@ -843,7 +843,7 @@ def _rewrite_query(query: str) -> list[str]:
 改写查询："""
 
             response = client_anthropic.messages.create(
-                model="claude-haiku-4-5",
+                model="claude-opus-4-6",
                 max_tokens=500,
                 messages=[{"role": "user", "content": prompt}]
             )
@@ -860,34 +860,86 @@ def _rewrite_query(query: str) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# Reranker with bge-reranker-v2-m3
+# Reranker with API (阿里百炼 qwen3-rerank)
 # ---------------------------------------------------------------------------
 
-_reranker_model = None
+def _rerank_with_api(query: str, documents: list[str]) -> list[float]:
+    """
+    使用阿里百炼 API 进行 Rerank
 
+    Args:
+        query: 用户查询
+        documents: 文档列表
 
-def _get_reranker():
-    """获取或初始化 Reranker 模型"""
-    global _reranker_model
+    Returns:
+        相关性分数列表（归一化到 0-1）
+    """
+    if not _embedding_available():
+        raise RuntimeError("Rerank API 未配置")
 
-    if not ENABLE_RERANKER:
-        return None
+    try:
+        import httpx
 
-    if _reranker_model is None:
+        # 阿里百炼 Rerank API 端点
+        url = EMBED_BASE_URL.rstrip('/') + '/rerank'
+
+        headers = {
+            "Authorization": f"Bearer {EMBED_API_KEY}",
+            "Content-Type": "application/json"
+        }
+
+        payload = {
+            "model": RERANKER_MODEL,
+            "query": query,
+            "documents": documents,
+            "return_documents": False,
+            "top_n": len(documents)
+        }
+
+        response = httpx.post(url, json=payload, headers=headers, timeout=30.0)
+        response.raise_for_status()
+
+        result = response.json()
+
+        # 解析响应
+        if "results" in result:
+            # 提取分数并按原始顺序排列
+            scores = [0.0] * len(documents)
+            for item in result["results"]:
+                idx = item.get("index", 0)
+                score = item.get("relevance_score", 0.0)
+                if idx < len(scores):
+                    scores[idx] = score
+            return scores
+        else:
+            raise RuntimeError(f"Rerank API 响应格式错误: {result}")
+
+    except Exception as e:
+        logger.warning(f"[Reranker] API 调用失败，使用降级评分: {e}")
+        # 降级：使用简单的 TF-IDF 相似度评分
         try:
-            from FlagEmbedding import FlagReranker
-            _reranker_model = FlagReranker(RERANKER_MODEL, use_fp16=True)
-            logger.info(f"[Reranker] 模型加载成功: {RERANKER_MODEL}")
-        except Exception as e:
-            logger.warning(f"[Reranker] 模型加载失败: {e}")
-            _reranker_model = False  # 标记为失败，避免重复尝试
+            from sklearn.feature_extraction.text import TfidfVectorizer
+            from sklearn.metrics.pairwise import cosine_similarity
 
-    return _reranker_model if _reranker_model is not False else None
+            vectorizer = TfidfVectorizer()
+            corpus = [query] + documents
+            tfidf_matrix = vectorizer.fit_transform(corpus)
+
+            # 计算查询与每个文档的相似度
+            query_vec = tfidf_matrix[0:1]
+            doc_vecs = tfidf_matrix[1:]
+            scores = cosine_similarity(query_vec, doc_vecs)[0].tolist()
+
+            return scores
+        except Exception as fallback_error:
+            logger.warning(f"[Reranker] 降级评分也失败: {fallback_error}")
+            # 最终降级：返回均匀分数
+            return [0.5] * len(documents)
 
 
 def _rerank_results(query: str, results: list[dict], top_k: int = None) -> list[dict]:
     """
-    使用 Reranker 对检索结果进行精排
+    使用 Reranker API 对检索结果进行精排
 
     Args:
         query: 用户查询
@@ -900,23 +952,12 @@ def _rerank_results(query: str, results: list[dict], top_k: int = None) -> list[
     if not results:
         return results
 
-    reranker = _get_reranker()
-    if reranker is None:
-        return results
-
     if top_k is None:
         top_k = RERANKER_TOP_K
 
     try:
-        # 准备输入对
-        pairs = [[query, item["text"]] for item in results]
-
-        # 计算相关性分数
-        scores = reranker.compute_score(pairs, normalize=True)
-
-        # 如果只有一个结果，scores 是单个值而不是列表
-        if not isinstance(scores, list):
-            scores = [scores]
+        documents = [item["text"] for item in results]
+        scores = _rerank_with_api(query, documents)
 
         # 添加 rerank 分数并排序
         for item, score in zip(results, scores):
@@ -924,7 +965,7 @@ def _rerank_results(query: str, results: list[dict], top_k: int = None) -> list[
 
         results.sort(key=lambda x: x["rerank_score"], reverse=True)
 
-        logger.info(f"[Reranker] 重排序完成，top-{top_k} 分数: {[r['rerank_score'] for r in results[:top_k]]}")
+        logger.info(f"[Reranker] 重排序完成（API），top-{top_k} 分数: {[r['rerank_score'] for r in results[:top_k]]}")
 
         return results[:top_k]
 

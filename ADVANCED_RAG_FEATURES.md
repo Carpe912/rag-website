@@ -17,9 +17,10 @@
 - 自动处理查询歧义和表达多样性
 
 #### 3. Reranker 精排
-- 使用 `bge-reranker-v2-m3` 模型对初排结果进行精排
+- 使用阿里百炼 `qwen3-rerank` API 模型对初排结果进行精排
 - 基于深度学习的相关性评分
 - 显著提升最终返回结果的质量
+- 与 Embedding API 使用相同的密钥和配置
 
 #### 4. 父子 Chunk 策略
 - 使用小块（子块）进行检索，提高匹配精度
@@ -39,9 +40,10 @@ ENABLE_HYBRID_SEARCH=true
 # 查询改写（Claude Haiku 多角度扩展）
 ENABLE_QUERY_REWRITE=true
 
-# Reranker 精排（bge-reranker-v2-m3）
+# Reranker 精排（阿里百炼 API）
 ENABLE_RERANKER=true
-RERANKER_MODEL=BAAI/bge-reranker-v2-m3
+RERANKER_TYPE=api
+RERANKER_MODEL=qwen3-rerank
 RERANKER_TOP_K=5
 
 # 父子 Chunk 策略（检索子块，返回父块）

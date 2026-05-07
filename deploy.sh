@@ -93,6 +93,17 @@ for pkg in anthropic fastapi openai sklearn; do
     fi
 done
 
+# 验证新增的 RAG 依赖
+echo "  验证高级 RAG 依赖..."
+for pkg in rank_bm25 jieba; do
+    pkg_import=$(echo $pkg | sed 's/-/_/g')
+    if .venv/bin/python -c "import $pkg_import" 2>/dev/null; then
+        echo "  ✅ $pkg"
+    else
+        echo "  ⚠️  $pkg 未安装（可选依赖，不影响基础功能）"
+    fi
+done
+
 # chromadb 单独验证（需先打 pysqlite3 patch）
 if .venv/bin/python - 2>/dev/null <<'PYEOF'
 try:
@@ -121,9 +132,14 @@ if [ ! -f "$APP_DIR/.env" ]; then
   echo "⚠️  未找到 .env 文件，请手动创建："
   echo "     vim $APP_DIR/.env"
   echo "   并填入以下内容："
-  echo "     ANTHROPIC_BASE_URL=https://cursor.scihub.edu.kg/api"
-  echo "     ANTHROPIC_AUTH_TOKEN=your_token"
+  echo "     ANTHROPIC_BASE_URL=http://118.89.81.103:8081"
+  echo "     ANTHROPIC_AUTH_TOKEN=sk-f2582742d1626781374d8476763c987b32e85fd8e8911c0ed2f7eff7e9413058"
   echo "     CLAUDE_MODEL=claude-opus-4-6"
+  echo "     # 高级 RAG 功能（全部启用）"
+  echo "     ENABLE_HYBRID_SEARCH=true"
+  echo "     ENABLE_QUERY_REWRITE=true"
+  echo "     ENABLE_RERANKER=true"
+  echo "     RERANKER_MODEL=qwen3-rerank"
 fi
 
 mkdir -p "$APP_DIR/data"
