@@ -16,11 +16,23 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      # ── 1. 拉取代码（用于后续检查，非必须但有利于 diff 日志）──
+      # ── 1. 拉取代码 ──
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ── 2. SSH 登录服务器，执行更新脚本 ──
+      # ── 2. 同步代码到服务器 ──
+      - name: Sync files to server
+        uses: burnett01/rsync-deployments@6.0.0
+        with:
+          switches: -avzr --delete --exclude='.env' --exclude='data/' --exclude='.git/' --exclude='.venv/'
+          path: ./
+          remote_path: /opt/qa-chat/
+          remote_host: ${{ secrets.SERVER_HOST }}
+          remote_user: ${{ secrets.SERVER_USER }}
+          remote_key: ${{ secrets.SERVER_SSH_KEY }}
+          remote_port: ${{ secrets.SERVER_PORT || '22' }}
+
+      # ── 3. SSH 登录服务器，执行更新脚本 ──
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -28,37 +40,27 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           key:      ${{ secrets.SERVER_SSH_KEY }}
           port:     ${{ secrets.SERVER_PORT || '22' }}
-          script_stop: true          # 任意步骤失败立即终止
+          script_stop: true
           script: |
             set -e
             APP_DIR="/opt/qa-chat"
             SERVICE="qa-chat"
 
-            echo "===== [1/4] 拉取最新代码 ====="
+            echo "===== [1/3] 安装/更新依赖 ====="
             cd "$APP_DIR"
-            # 保留 .env 和 data/ 等本地文件，强制同步远程代码
-            # 国内服务器访问 GitHub 不稳定，最多重试 3 次
-            for i in 1 2 3; do
-              git fetch origin master && break
-              echo "git fetch 失败，第 $i 次重试（等待 10s）..."
-              sleep 10
-            done
-            git reset --hard origin/master
-
-            echo "===== [2/4] 安装/更新依赖 ====="
             .venv/bin/pip install -q --upgrade pip
             .venv/bin/pip install -q -r requirements.txt
 
-            echo "===== [3/4] 重启服务 ====="
+            echo "===== [2/3] 重启服务 ====="
             systemctl restart "$SERVICE"
 
-            echo "===== [4/4] 验证服务状态 ====="
+            echo "===== [3/3] 验证服务状态 ====="
             sleep 3
             systemctl is-active --quiet "$SERVICE" \
               && echo "✅ 服务运行正常" \
               || (echo "❌ 服务启动失败，查看日志：" && journalctl -u "$SERVICE" -n 30 --no-pager && exit 1)
 
-      # ── 3. 部署结果通知（可选，失败时也会通知）──
+      # ── 4. 部署结果通知 ──
       - name: Notify result
         if: always()
         run: |
