@@ -33,6 +33,11 @@ from rag import (
     _embedding_available,
     EMBED_MODEL,
     EMBED_DIMS,
+    ENABLE_HYBRID_SEARCH,
+    ENABLE_QUERY_REWRITE,
+    ENABLE_RERANKER,
+    ENABLE_PARENT_CHILD,
+    RERANKER_MODEL,
     Document,
 )
 
@@ -448,6 +453,13 @@ async def health():
         "base_url": os.getenv("ANTHROPIC_BASE_URL", "default"),
         "embedding": embed_status,
         "chroma": get_chroma_status(),
+        "advanced_rag": {
+            "hybrid_search": ENABLE_HYBRID_SEARCH,
+            "query_rewrite": ENABLE_QUERY_REWRITE,
+            "reranker": ENABLE_RERANKER,
+            "reranker_model": RERANKER_MODEL if ENABLE_RERANKER else None,
+            "parent_child": ENABLE_PARENT_CHILD,
+        }
     }
 
 
@@ -599,4 +611,69 @@ async def sync_api_source_endpoint(source_id: str):
         "count": result["count"],
         "doc_ids": result["doc_ids"],
     }
+
+
+# ---------------------------------------------------------------------------
+# Advanced RAG Configuration Endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/api/rag/config")
+async def get_rag_config():
+    """获取当前 RAG 配置"""
+    return {
+        "hybrid_search": ENABLE_HYBRID_SEARCH,
+        "query_rewrite": ENABLE_QUERY_REWRITE,
+        "reranker": ENABLE_RERANKER,
+        "reranker_model": RERANKER_MODEL,
+        "parent_child": ENABLE_PARENT_CHILD,
+        "embedding_model": EMBED_MODEL,
+        "embedding_dims": EMBED_DIMS,
+    }
+
+
+class RagConfigUpdate(BaseModel):
+    hybrid_search: bool | None = None
+    query_rewrite: bool | None = None
+    reranker: bool | None = None
+    parent_child: bool | None = None
+
+
+@app.post("/api/rag/config")
+async def update_rag_config(config: RagConfigUpdate):
+    """
+    更新 RAG 配置（运行时动态调整）
+    注意：这些配置在服务重启后会恢复为环境变量中的默认值
+    """
+    import rag as rag_module
+
+    updated = {}
+
+    if config.hybrid_search is not None:
+        rag_module.ENABLE_HYBRID_SEARCH = config.hybrid_search
+        updated["hybrid_search"] = config.hybrid_search
+
+    if config.query_rewrite is not None:
+        rag_module.ENABLE_QUERY_REWRITE = config.query_rewrite
+        updated["query_rewrite"] = config.query_rewrite
+
+    if config.reranker is not None:
+        rag_module.ENABLE_RERANKER = config.reranker
+        updated["reranker"] = config.reranker
+
+    if config.parent_child is not None:
+        rag_module.ENABLE_PARENT_CHILD = config.parent_child
+        updated["parent_child"] = config.parent_child
+
+    return {
+        "message": "RAG 配置已更新（重启后恢复默认值）",
+        "updated": updated,
+        "current_config": {
+            "hybrid_search": rag_module.ENABLE_HYBRID_SEARCH,
+            "query_rewrite": rag_module.ENABLE_QUERY_REWRITE,
+            "reranker": rag_module.ENABLE_RERANKER,
+            "parent_child": rag_module.ENABLE_PARENT_CHILD,
+        }
+    }
+
+
 

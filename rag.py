@@ -48,6 +48,16 @@ CHUNK_SIZE    = 500
 CHUNK_OVERLAP = 60
 MAX_CONTEXT_CHUNKS = 5
 
+# --- Advanced RAG ---
+ENABLE_HYBRID_SEARCH = os.getenv("ENABLE_HYBRID_SEARCH", "true").lower() == "true"
+ENABLE_QUERY_REWRITE = os.getenv("ENABLE_QUERY_REWRITE", "true").lower() == "true"
+ENABLE_RERANKER = os.getenv("ENABLE_RERANKER", "true").lower() == "true"
+ENABLE_PARENT_CHILD = os.getenv("ENABLE_PARENT_CHILD", "false").lower() == "true"
+RERANKER_MODEL = os.getenv("RERANKER_MODEL", "BAAI/bge-reranker-v2-m3")
+RERANKER_TOP_K = int(os.getenv("RERANKER_TOP_K", "5"))
+PARENT_CHUNK_SIZE = 1500  # 父块大小
+CHILD_CHUNK_SIZE = 500    # 子块大小（用于检索）
+
 # --- Embedding ---
 EMBED_API_KEY  = os.getenv("EMBED_API_KEY", "")
 EMBED_BASE_URL = os.getenv("EMBED_BASE_URL", "")
@@ -70,6 +80,7 @@ class Chunk:
     text:       str
     char_start: int
     source_url: str = ""  # 数据来源URL
+    parent_id:  str = ""  # 父块ID（用于父子chunk策略）
     # embedding 仅在 Chroma 不可用时写入 JSON（NumPy 降级）
     embedding:  list[float] = field(default_factory=list)
 
@@ -201,7 +212,12 @@ def _chroma_add_chunks(chunks: list[Chunk], embeddings: list[list[float]]) -> No
         embeddings=embeddings,
         documents=[c.text for c in chunks],
         metadatas=[
-            {"doc_id": c.doc_id, "doc_name": c.doc_name, "char_start": c.char_start}
+            {
+                "doc_id": c.doc_id,
+                "doc_name": c.doc_name,
+                "char_start": c.char_start,
+                "parent_id": c.parent_id or "",
+            }
             for c in chunks
         ],
     )
@@ -215,7 +231,12 @@ def _chroma_upsert_chunks(chunks: list[Chunk], embeddings: list[list[float]]) ->
         embeddings=embeddings,
         documents=[c.text for c in chunks],
         metadatas=[
-            {"doc_id": c.doc_id, "doc_name": c.doc_name, "char_start": c.char_start}
+            {
+                "doc_id": c.doc_id,
+                "doc_name": c.doc_name,
+                "char_start": c.char_start,
+                "parent_id": c.parent_id or "",
+            }
             for c in chunks
         ],
     )
@@ -648,6 +669,271 @@ def re_embed_document(doc_id: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# BM25 Retrieval
+# ---------------------------------------------------------------------------
+
+_bm25_index = None
+_bm25_chunks = []
+
+
+def _build_bm25_index(chunks: list[Chunk]) -> None:
+    """构建 BM25 索引"""
+    global _bm25_index, _bm25_chunks
+    try:
+        from rank_bm25 import BM25Okapi
+        import jieba
+
+        _bm25_chunks = chunks
+        # 对中文进行分词，英文按空格分割
+        tokenized_corpus = []
+        for chunk in chunks:
+            # 简单的中英文混合分词
+            words = []
+            for char in chunk.text:
+                if '一' <= char <= '鿿':  # 中文字符
+                    words.extend(jieba.cut(char))
+                else:
+                    words.append(char)
+            # 也保留原始的空格分词
+            words.extend(chunk.text.lower().split())
+            tokenized_corpus.append(words)
+
+        _bm25_index = BM25Okapi(tokenized_corpus)
+        logger.info(f"[BM25] 索引构建完成，共 {len(chunks)} 个文档块")
+    except ImportError:
+        logger.warning("[BM25] rank-bm25 未安装，BM25检索不可用")
+        _bm25_index = None
+
+
+def _bm25_search(query: str, top_k: int = 10) -> list[dict]:
+    """使用 BM25 检索"""
+    global _bm25_index, _bm25_chunks
+
+    if _bm25_index is None or not _bm25_chunks:
+        return []
+
+    try:
+        import jieba
+        # 对查询进行分词
+        query_words = []
+        for char in query:
+            if '一' <= char <= '鿿':
+                query_words.extend(jieba.cut(char))
+            else:
+                query_words.append(char)
+        query_words.extend(query.lower().split())
+
+        scores = _bm25_index.get_scores(query_words)
+        top_indices = np.argsort(scores)[::-1][:top_k]
+
+        results = []
+        for idx in top_indices:
+            if scores[idx] > 0:
+                chunk = _bm25_chunks[idx]
+                results.append({
+                    "text": chunk.text,
+                    "doc_name": chunk.doc_name,
+                    "doc_id": chunk.doc_id,
+                    "char_start": chunk.char_start,
+                    "score": float(scores[idx]),
+                    "chunk_id": chunk.chunk_id,
+                })
+
+        return results
+    except Exception as e:
+        logger.warning(f"[BM25] 检索失败: {e}")
+        return []
+
+
+# ---------------------------------------------------------------------------
+# RRF (Reciprocal Rank Fusion)
+# ---------------------------------------------------------------------------
+
+def _reciprocal_rank_fusion(
+    rankings: list[list[dict]],
+    k: int = 60
+) -> list[dict]:
+    """
+    RRF 融合多个排序结果
+
+    Args:
+        rankings: 多个检索结果列表，每个结果是 dict，必须包含唯一标识字段
+        k: RRF 参数，默认 60
+
+    Returns:
+        融合后的排序结果
+    """
+    rrf_scores = {}
+    chunk_data = {}
+
+    for ranking in rankings:
+        for rank, item in enumerate(ranking, 1):
+            # 使用 chunk_id 或 text 作为唯一标识
+            item_id = item.get("chunk_id", item.get("text", ""))
+            if not item_id:
+                continue
+
+            # RRF 公式: 1 / (k + rank)
+            if item_id not in rrf_scores:
+                rrf_scores[item_id] = 0
+                chunk_data[item_id] = item
+
+            rrf_scores[item_id] += 1.0 / (k + rank)
+
+    # 按 RRF 分数排序
+    sorted_items = sorted(
+        rrf_scores.items(),
+        key=lambda x: x[1],
+        reverse=True
+    )
+
+    results = []
+    for item_id, score in sorted_items:
+        item = chunk_data[item_id].copy()
+        item["rrf_score"] = score
+        results.append(item)
+
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Query Rewriting with Claude Haiku
+# ---------------------------------------------------------------------------
+
+def _rewrite_query(query: str) -> list[str]:
+    """
+    使用 Claude Haiku 对查询进行多角度改写
+
+    Returns:
+        包含原始查询和改写查询的列表
+    """
+    if not ENABLE_QUERY_REWRITE:
+        return [query]
+
+    try:
+        from openai import OpenAI
+
+        # 检查是否配置了 Claude API
+        api_key = os.getenv("ANTHROPIC_AUTH_TOKEN") or os.getenv("ANTHROPIC_API_KEY")
+        base_url = os.getenv("ANTHROPIC_BASE_URL")
+
+        if not api_key:
+            logger.warning("[QueryRewrite] Claude API 未配置，跳过查询改写")
+            return [query]
+
+        # 使用 OpenAI 兼容格式调用 Claude
+        client = OpenAI(api_key=api_key, base_url=base_url) if base_url else None
+
+        if not client:
+            # 如果没有自定义 base_url，使用 anthropic SDK
+            import anthropic
+            client_anthropic = anthropic.Anthropic(api_key=api_key)
+
+            prompt = f"""请将以下用户查询改写为3个不同角度的问题，以提高检索召回率。
+
+原始查询：{query}
+
+要求：
+1. 保持原意，但从不同角度表达
+2. 使用不同的关键词和表述方式
+3. 每个改写查询单独一行
+4. 不要添加编号或其他标记
+5. 直接输出改写结果，不要解释
+
+改写查询："""
+
+            response = client_anthropic.messages.create(
+                model="claude-haiku-4-5",
+                max_tokens=500,
+                messages=[{"role": "user", "content": prompt}]
+            )
+
+            rewritten = response.content[0].text.strip().split('\n')
+            rewritten = [q.strip() for q in rewritten if q.strip()]
+
+            # 返回原始查询 + 改写查询
+            return [query] + rewritten[:3]
+
+    except Exception as e:
+        logger.warning(f"[QueryRewrite] 查询改写失败: {e}")
+        return [query]
+
+
+# ---------------------------------------------------------------------------
+# Reranker with bge-reranker-v2-m3
+# ---------------------------------------------------------------------------
+
+_reranker_model = None
+
+
+def _get_reranker():
+    """获取或初始化 Reranker 模型"""
+    global _reranker_model
+
+    if not ENABLE_RERANKER:
+        return None
+
+    if _reranker_model is None:
+        try:
+            from FlagEmbedding import FlagReranker
+            _reranker_model = FlagReranker(RERANKER_MODEL, use_fp16=True)
+            logger.info(f"[Reranker] 模型加载成功: {RERANKER_MODEL}")
+        except Exception as e:
+            logger.warning(f"[Reranker] 模型加载失败: {e}")
+            _reranker_model = False  # 标记为失败，避免重复尝试
+
+    return _reranker_model if _reranker_model is not False else None
+
+
+def _rerank_results(query: str, results: list[dict], top_k: int = None) -> list[dict]:
+    """
+    使用 Reranker 对检索结果进行精排
+
+    Args:
+        query: 用户查询
+        results: 初排结果列表
+        top_k: 返回前 k 个结果，默认使用 RERANKER_TOP_K
+
+    Returns:
+        重排序后的结果
+    """
+    if not results:
+        return results
+
+    reranker = _get_reranker()
+    if reranker is None:
+        return results
+
+    if top_k is None:
+        top_k = RERANKER_TOP_K
+
+    try:
+        # 准备输入对
+        pairs = [[query, item["text"]] for item in results]
+
+        # 计算相关性分数
+        scores = reranker.compute_score(pairs, normalize=True)
+
+        # 如果只有一个结果，scores 是单个值而不是列表
+        if not isinstance(scores, list):
+            scores = [scores]
+
+        # 添加 rerank 分数并排序
+        for item, score in zip(results, scores):
+            item["rerank_score"] = float(score)
+
+        results.sort(key=lambda x: x["rerank_score"], reverse=True)
+
+        logger.info(f"[Reranker] 重排序完成，top-{top_k} 分数: {[r['rerank_score'] for r in results[:top_k]]}")
+
+        return results[:top_k]
+
+    except Exception as e:
+        logger.warning(f"[Reranker] 重排序失败: {e}")
+        return results[:top_k]
+
+
+# ---------------------------------------------------------------------------
 # Retrieval
 # ---------------------------------------------------------------------------
 
@@ -660,10 +946,60 @@ def _cosine_similarity_batch(query_vec: np.ndarray, matrix: np.ndarray) -> np.nd
     return (matrix @ query_vec) / (matrix_norms * query_norm)
 
 
+def _expand_to_parent_chunks(results: list[dict], all_chunks: list[Chunk]) -> list[dict]:
+    """
+    父子 Chunk 策略：将检索到的子块扩展为父块
+
+    Args:
+        results: 检索结果列表
+        all_chunks: 所有文档块
+
+    Returns:
+        扩展后的结果列表
+    """
+    if not ENABLE_PARENT_CHILD:
+        return results
+
+    # 构建 chunk_id 到 chunk 的映射
+    chunk_map = {c.chunk_id: c for c in all_chunks}
+
+    expanded_results = []
+    seen_parents = set()
+
+    for result in results:
+        chunk_id = result.get("chunk_id", "")
+        if not chunk_id or chunk_id not in chunk_map:
+            expanded_results.append(result)
+            continue
+
+        chunk = chunk_map[chunk_id]
+        parent_id = chunk.parent_id
+
+        # 如果有父块且未处理过
+        if parent_id and parent_id in chunk_map and parent_id not in seen_parents:
+            parent_chunk = chunk_map[parent_id]
+            expanded_results.append({
+                "text": parent_chunk.text,
+                "doc_name": parent_chunk.doc_name,
+                "doc_id": parent_chunk.doc_id,
+                "char_start": parent_chunk.char_start,
+                "chunk_id": parent_id,
+            })
+            seen_parents.add(parent_id)
+        elif not parent_id:
+            # 没有父块，使用原始块
+            if chunk_id not in seen_parents:
+                expanded_results.append(result)
+                seen_parents.add(chunk_id)
+
+    return expanded_results
+
+
 def retrieve_context(query: str, top_k: int = MAX_CONTEXT_CHUNKS) -> str:
     """
-    检索最相关文本块。优先级：
-      Chroma + Embedding → NumPy + Embedding → TF-IDF
+    检索最相关文本块。支持混合检索（BM25 + 向量 + RRF 融合）。
+    优先级：
+      混合检索（BM25 + Embedding + RRF） → Chroma + Embedding → NumPy + Embedding → TF-IDF
     """
     docs = load_documents()
     if not docs:
@@ -674,23 +1010,78 @@ def retrieve_context(query: str, top_k: int = MAX_CONTEXT_CHUNKS) -> str:
         return ""
 
     method = "tfidf"
-    results: list[dict] = []   # [{text, doc_name, doc_id, char_start}]
+    results: list[dict] = []   # [{text, doc_name, doc_id, char_start, chunk_id}]
 
-    # ── 方案 A: Chroma ──
-    if _embedding_available() and _chroma_available():
+    # ── 查询改写（可选）──
+    queries = [query]
+    if ENABLE_QUERY_REWRITE:
+        queries = _rewrite_query(query)
+        logger.info(f"[QueryRewrite] 生成 {len(queries)} 个查询变体")
+
+    # ── 方案 A: 混合检索（BM25 + 向量 + RRF）──
+    if ENABLE_HYBRID_SEARCH and _embedding_available() and _chroma_available():
+        try:
+            col = _get_chroma_collection()
+            if col.count() > 0:
+                # 构建 BM25 索引
+                _build_bm25_index(all_chunks)
+
+                all_rankings = []
+
+                # 对每个查询变体进行检索
+                for q in queries:
+                    # 1. 向量检索
+                    q_vec = embed_query(q)
+                    if q_vec:
+                        vector_results = _chroma_query(q_vec, top_k * 3)
+                        # 添加 chunk_id
+                        for r in vector_results:
+                            r["chunk_id"] = f"{r['doc_id']}_{r['char_start']}"
+                        all_rankings.append(vector_results)
+
+                    # 2. BM25 检索
+                    bm25_results = _bm25_search(q, top_k * 3)
+                    if bm25_results:
+                        all_rankings.append(bm25_results)
+
+                # 3. RRF 融合
+                if all_rankings:
+                    results = _reciprocal_rank_fusion(all_rankings)
+                    results = results[:top_k * 2]  # 取前 2*top_k 送入 reranker
+                    method = "hybrid(bm25+vector+rrf)"
+
+                    # 4. Reranker 精排（可选）
+                    if ENABLE_RERANKER and results:
+                        results = _rerank_results(query, results, top_k)
+                        method = "hybrid(bm25+vector+rrf+rerank)"
+
+        except Exception as e:
+            logger.warning(f"[RAG] 混合检索失败，降级: {e}")
+
+    # ── 方案 B: Chroma + Embedding（单一向量检索）──
+    if not results and _embedding_available() and _chroma_available():
         try:
             col = _get_chroma_collection()
             if col.count() > 0:
                 q_vec = embed_query(query)
                 if q_vec:
-                    raw = _chroma_query(q_vec, top_k)
+                    raw = _chroma_query(q_vec, top_k * 2)
                     # cosine distance < 0.6 才认为相关（余弦相似度 > 0.4）
                     results = [r for r in raw if r["distance"] < 0.6]
-                    method = "chroma+embedding"
+
+                    # Reranker 精排（可选）
+                    if ENABLE_RERANKER and results:
+                        for r in results:
+                            r["chunk_id"] = f"{r['doc_id']}_{r['char_start']}"
+                        results = _rerank_results(query, results, top_k)
+                        method = "chroma+embedding+rerank"
+                    else:
+                        results = results[:top_k]
+                        method = "chroma+embedding"
         except Exception as e:
             logger.warning(f"[RAG] Chroma 检索失败，降级: {e}")
 
-    # ── 方案 B: NumPy + Embedding（JSON 中有向量）──
+    # ── 方案 C: NumPy + Embedding（JSON 中有向量）──
     if not results and _embedding_available():
         chunks_with_emb = [c for c in all_chunks if c.embedding]
         if chunks_with_emb:
@@ -703,7 +1094,7 @@ def retrieve_context(query: str, top_k: int = MAX_CONTEXT_CHUNKS) -> str:
                     scores = _cosine_similarity_batch(
                         np.array(q_vec, dtype=np.float32), matrix
                     )
-                    top_idx = np.argsort(scores)[::-1][:top_k].tolist()
+                    top_idx = np.argsort(scores)[::-1][:top_k * 2].tolist()
                     top_idx = [i for i in top_idx if scores[i] >= 0.10]
                     results = [
                         {
@@ -711,14 +1102,22 @@ def retrieve_context(query: str, top_k: int = MAX_CONTEXT_CHUNKS) -> str:
                             "doc_name":   chunks_with_emb[i].doc_name,
                             "doc_id":     chunks_with_emb[i].doc_id,
                             "char_start": chunks_with_emb[i].char_start,
+                            "chunk_id":   chunks_with_emb[i].chunk_id,
                         }
                         for i in top_idx
                     ]
-                    method = "numpy+embedding"
+
+                    # Reranker 精排（可选）
+                    if ENABLE_RERANKER and results:
+                        results = _rerank_results(query, results, top_k)
+                        method = "numpy+embedding+rerank"
+                    else:
+                        results = results[:top_k]
+                        method = "numpy+embedding"
             except Exception as e:
                 logger.warning(f"[RAG] NumPy embedding 检索失败，降级: {e}")
 
-    # ── 方案 C: TF-IDF ──
+    # ── 方案 D: TF-IDF ──
     if not results:
         corpus = [c.text for c in all_chunks]
         try:
@@ -761,6 +1160,10 @@ def retrieve_context(query: str, top_k: int = MAX_CONTEXT_CHUNKS) -> str:
         return ""
 
     logger.info(f"[RAG] 方式={method}, 命中={len(results)} 块")
+
+    # 父子 Chunk 策略：如果启用，用父块替换子块
+    if ENABLE_PARENT_CHILD:
+        results = _expand_to_parent_chunks(results, all_chunks)
 
     # 按文档位置排序，保持上下文连贯性
     results.sort(key=lambda r: (r["doc_id"], r["char_start"]))
