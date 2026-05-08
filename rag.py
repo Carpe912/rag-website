@@ -575,6 +575,68 @@ def _split_into_chunks(
     return [(t, s) for t, s in chunks if t.strip()]
 
 
+def _split_into_parent_child_chunks(
+    text: str,
+    parent_size: int = PARENT_CHUNK_SIZE,
+    child_size: int = CHILD_CHUNK_SIZE,
+    child_overlap: int = CHUNK_OVERLAP,
+) -> list[tuple[str, int, Optional[str]]]:
+    """
+    父子 Chunk 分块策略
+
+    先创建大的父块（parent_size），然后在每个父块内创建小的子块（child_size）。
+    子块用于检索（精确匹配），父块用于提供上下文（完整信息）。
+
+    Args:
+        text: 原始文本
+        parent_size: 父块大小（默认 1500 字符）
+        child_size: 子块大小（默认 500 字符）
+        child_overlap: 子块重叠大小（默认 60 字符）
+
+    Returns:
+        list[tuple[chunk_text, char_start, parent_id]]
+        - 父块的 parent_id 为 None
+        - 子块的 parent_id 指向其所属的父块 ID
+    """
+    text = re.sub(r"\r\n", "\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+
+    # 第一步：创建父块
+    parent_chunks = _split_into_chunks(text, chunk_size=parent_size, overlap=0)
+
+    all_chunks: list[tuple[str, int, Optional[str]]] = []
+    parent_idx = 0
+
+    # 第二步：为每个父块创建子块
+    for parent_text, parent_start in parent_chunks:
+        # 生成父块 ID（临时 ID，实际 ID 在 ingest_document 中生成）
+        parent_temp_id = f"parent_{parent_idx}"
+
+        # 添加父块本身（parent_id 为 None 表示这是父块）
+        all_chunks.append((parent_text, parent_start, None))
+
+        # 只有当父块足够大时才创建子块（避免父块和子块完全相同）
+        if len(parent_text) > child_size * 1.5:
+            # 在父块内创建子块
+            child_chunks = _split_into_chunks(
+                parent_text,
+                chunk_size=child_size,
+                overlap=child_overlap
+            )
+
+            # 只有当子块数量大于1时才添加（避免单个子块和父块重复）
+            if len(child_chunks) > 1:
+                for child_text, child_relative_start in child_chunks:
+                    # 子块的绝对位置 = 父块起始位置 + 子块在父块内的相对位置
+                    child_absolute_start = parent_start + child_relative_start
+                    # 添加子块，parent_id 指向父块的临时 ID
+                    all_chunks.append((child_text, child_absolute_start, parent_temp_id))
+
+        parent_idx += 1
+
+    return all_chunks
+
+
 # ---------------------------------------------------------------------------
 # Ingestion
 # ---------------------------------------------------------------------------
@@ -585,21 +647,62 @@ def ingest_document(file_bytes: bytes, filename: str, embed: bool = True) -> Doc
     embed=False 时只做分块和持久化，跳过向量化（供后台异步调用）。
     """
     text = extract_text(file_bytes, filename)
-    raw_chunks = _split_into_chunks(text)
 
     doc_id = str(uuid.uuid4())
     ext = Path(filename).suffix.lower().lstrip(".")
 
-    chunks = [
-        Chunk(
-            chunk_id=f"{doc_id}_{i}",
-            doc_id=doc_id,
-            doc_name=filename,
-            text=chunk_text,
-            char_start=char_start,
-        )
-        for i, (chunk_text, char_start) in enumerate(raw_chunks)
-    ]
+    # 根据是否启用父子 Chunk 策略选择不同的分块方式
+    if ENABLE_PARENT_CHILD:
+        logger.info(f"[RAG] 使用父子 Chunk 策略（父块={PARENT_CHUNK_SIZE}，子块={CHILD_CHUNK_SIZE}）")
+        raw_chunks_with_parent = _split_into_parent_child_chunks(text)
+
+        # 第一步：创建所有 Chunk 对象，并建立父块 ID 映射
+        parent_id_map = {}  # 临时 ID -> 实际 ID
+        chunks = []
+        parent_idx = 0
+        child_idx = 0
+
+        for chunk_text, char_start, parent_temp_id in raw_chunks_with_parent:
+            if parent_temp_id is None:
+                # 这是父块
+                actual_parent_id = f"{doc_id}_parent_{parent_idx}"
+                parent_id_map[f"parent_{parent_idx}"] = actual_parent_id
+                chunks.append(Chunk(
+                    chunk_id=actual_parent_id,
+                    doc_id=doc_id,
+                    doc_name=filename,
+                    text=chunk_text,
+                    char_start=char_start,
+                    parent_id="",  # 父块的 parent_id 为空
+                ))
+                parent_idx += 1
+            else:
+                # 这是子块
+                actual_parent_id = parent_id_map.get(parent_temp_id, "")
+                chunks.append(Chunk(
+                    chunk_id=f"{doc_id}_child_{child_idx}",
+                    doc_id=doc_id,
+                    doc_name=filename,
+                    text=chunk_text,
+                    char_start=char_start,
+                    parent_id=actual_parent_id,
+                ))
+                child_idx += 1
+
+        logger.info(f"[RAG] 创建了 {parent_idx} 个父块，{child_idx} 个子块")
+    else:
+        # 标准分块策略
+        raw_chunks = _split_into_chunks(text)
+        chunks = [
+            Chunk(
+                chunk_id=f"{doc_id}_{i}",
+                doc_id=doc_id,
+                doc_name=filename,
+                text=chunk_text,
+                char_start=char_start,
+            )
+            for i, (chunk_text, char_start) in enumerate(raw_chunks)
+        ]
 
     has_embeddings = False
 
@@ -821,15 +924,7 @@ def _rewrite_query(query: str) -> list[str]:
             logger.warning("[QueryRewrite] Claude API 未配置，跳过查询改写")
             return [query]
 
-        # 使用 OpenAI 兼容格式调用 Claude
-        client = OpenAI(api_key=api_key, base_url=base_url) if base_url else None
-
-        if not client:
-            # 如果没有自定义 base_url，使用 anthropic SDK
-            import anthropic
-            client_anthropic = anthropic.Anthropic(api_key=api_key)
-
-            prompt = f"""请将以下用户查询改写为3个不同角度的问题，以提高检索召回率。
+        prompt = f"""请将以下用户查询改写为3个不同角度的问题，以提高检索召回率。
 
 原始查询：{query}
 
@@ -842,17 +937,32 @@ def _rewrite_query(query: str) -> list[str]:
 
 改写查询："""
 
-            response = client_anthropic.messages.create(
-                model="claude-opus-4-6",
+        if base_url:
+            # 使用 OpenAI 兼容格式调用 Claude
+            client = OpenAI(api_key=api_key, base_url=base_url)
+            response = client.chat.completions.create(
+                model="claude-haiku-4-6",
                 max_tokens=500,
                 messages=[{"role": "user", "content": prompt}]
             )
+            rewritten_text = response.choices[0].message.content.strip()
+        else:
+            # 使用 anthropic SDK
+            import anthropic
+            client_anthropic = anthropic.Anthropic(api_key=api_key)
+            response = client_anthropic.messages.create(
+                model="claude-haiku-4-6",
+                max_tokens=500,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            rewritten_text = response.content[0].text.strip()
 
-            rewritten = response.content[0].text.strip().split('\n')
-            rewritten = [q.strip() for q in rewritten if q.strip()]
+        # 解析改写结果
+        rewritten = rewritten_text.split('\n')
+        rewritten = [q.strip() for q in rewritten if q.strip()]
 
-            # 返回原始查询 + 改写查询
-            return [query] + rewritten[:3]
+        # 返回原始查询 + 改写查询
+        return [query] + rewritten[:3]
 
     except Exception as e:
         logger.warning(f"[QueryRewrite] 查询改写失败: {e}")
@@ -991,9 +1101,15 @@ def _expand_to_parent_chunks(results: list[dict], all_chunks: list[Chunk]) -> li
     """
     父子 Chunk 策略：将检索到的子块扩展为父块
 
+    工作原理：
+    1. 检索时使用小的子块（精确匹配）
+    2. 返回时替换为大的父块（完整上下文）
+    3. 如果检索到的是父块本身，直接返回
+    4. 去重，避免返回重复的父块
+
     Args:
-        results: 检索结果列表
-        all_chunks: 所有文档块
+        results: 检索结果列表，每个元素包含 chunk_id, text, doc_name 等
+        all_chunks: 所有文档块（包括父块和子块）
 
     Returns:
         扩展后的结果列表
@@ -1005,34 +1121,41 @@ def _expand_to_parent_chunks(results: list[dict], all_chunks: list[Chunk]) -> li
     chunk_map = {c.chunk_id: c for c in all_chunks}
 
     expanded_results = []
-    seen_parents = set()
+    seen_ids = set()  # 用于去重
 
     for result in results:
         chunk_id = result.get("chunk_id", "")
         if not chunk_id or chunk_id not in chunk_map:
-            expanded_results.append(result)
+            # 如果找不到对应的 chunk，保留原始结果
+            if chunk_id not in seen_ids:
+                expanded_results.append(result)
+                seen_ids.add(chunk_id)
             continue
 
         chunk = chunk_map[chunk_id]
         parent_id = chunk.parent_id
 
-        # 如果有父块且未处理过
-        if parent_id and parent_id in chunk_map and parent_id not in seen_parents:
-            parent_chunk = chunk_map[parent_id]
-            expanded_results.append({
-                "text": parent_chunk.text,
-                "doc_name": parent_chunk.doc_name,
-                "doc_id": parent_chunk.doc_id,
-                "char_start": parent_chunk.char_start,
-                "chunk_id": parent_id,
-            })
-            seen_parents.add(parent_id)
-        elif not parent_id:
-            # 没有父块，使用原始块
-            if chunk_id not in seen_parents:
+        # 情况1：这是子块，需要扩展为父块
+        if parent_id and parent_id in chunk_map:
+            if parent_id not in seen_ids:
+                parent_chunk = chunk_map[parent_id]
+                expanded_results.append({
+                    "text": parent_chunk.text,
+                    "doc_name": parent_chunk.doc_name,
+                    "doc_id": parent_chunk.doc_id,
+                    "char_start": parent_chunk.char_start,
+                    "chunk_id": parent_id,
+                    "distance": result.get("distance", 0),  # 保留原始相似度分数
+                })
+                seen_ids.add(parent_id)
+                logger.debug(f"[ParentChild] 子块 {chunk_id} 扩展为父块 {parent_id}")
+        # 情况2：这是父块或没有父块的普通块，直接使用
+        else:
+            if chunk_id not in seen_ids:
                 expanded_results.append(result)
-                seen_parents.add(chunk_id)
+                seen_ids.add(chunk_id)
 
+    logger.info(f"[ParentChild] 扩展前 {len(results)} 块 → 扩展后 {len(expanded_results)} 块")
     return expanded_results
 
 
