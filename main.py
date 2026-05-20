@@ -233,15 +233,6 @@ async def chat(request: ChatRequest):
     else:
         system_prompt = BASE_SYSTEM_PROMPT
 
-    # 将 system prompt 合并到第一条用户消息中（兼容不支持 system 参数的 API 代理）
-    if api_messages and system_prompt:
-        # 找到第一条用户消息
-        for i, msg in enumerate(api_messages):
-            if msg["role"] == "user":
-                # 将 system prompt 前置到第一条用户消息
-                api_messages[i]["content"] = f"{system_prompt}\n\n{msg['content']}"
-                break
-
     client = get_client()
 
     async def event_stream() -> AsyncGenerator[str, None]:
@@ -250,6 +241,7 @@ async def chat(request: ChatRequest):
             async with client.messages.stream(
                 model=MODEL,
                 max_tokens=MAX_TOKENS,
+                system=system_prompt,
                 messages=api_messages,
             ) as stream:
                 async for event in stream:
