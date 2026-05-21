@@ -365,6 +365,7 @@ def _chroma_query(query_embedding: list[float], top_k: int) -> list[dict]:
     return items
 
 
+
 # ---------------------------------------------------------------------------
 # Embedding API（阿里云 DashScope，OpenAI 兼容格式）
 # ---------------------------------------------------------------------------
