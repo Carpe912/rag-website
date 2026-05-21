@@ -560,12 +560,13 @@ body {
 
 /* Inline code */
 .bubble-content code:not([class]) {
-  background: rgba(255,255,255,0.08);
-  border: 1px solid rgba(255,255,255,0.1);
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
   padding: 1px 5px;
   border-radius: 4px;
   font-family: var(--font-mono);
   font-size: 0.88em;
+  color: var(--text-primary);
 }
 
 /* Code blocks */
@@ -573,6 +574,7 @@ body {
   margin: 0;
   border-radius: 0 0 var(--radius-sm) var(--radius-sm);
   overflow: hidden;
+  background: var(--bg-secondary) !important;
 }
 
 .code-block-wrapper {
@@ -580,7 +582,8 @@ body {
   margin: 0.7em 0;
   border-radius: var(--radius-sm);
   overflow: hidden;
-  border: 1px solid rgba(255,255,255,0.1);
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
 }
 
 .code-header {
@@ -588,17 +591,17 @@ body {
   align-items: center;
   justify-content: space-between;
   padding: 6px 12px;
-  background: rgba(0,0,0,0.35);
-  border-bottom: 1px solid rgba(255,255,255,0.06);
+  background: var(--bg-hover);
+  border-bottom: 1px solid var(--border);
   font-size: 11px;
   font-family: var(--font-mono);
-  color: var(--text-muted);
+  color: var(--text-secondary);
 }
 
 .code-copy-btn {
   background: none;
-  border: 1px solid rgba(255,255,255,0.15);
-  color: var(--text-muted);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
   padding: 2px 8px;
   border-radius: 4px;
   font-size: 11px;
@@ -606,7 +609,7 @@ body {
   transition: all var(--transition);
   font-family: var(--font-sans);
 }
-.code-copy-btn:hover { background: rgba(255,255,255,0.08); color: var(--text-primary); }
+.code-copy-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
 .code-copy-btn.copied { color: var(--success); border-color: var(--success); }
 
 .bubble-content pre code {
@@ -616,7 +619,8 @@ body {
   display: block;
   padding: 12px 14px !important;
   overflow-x: auto;
-  background: transparent !important;
+  background: var(--bg-secondary) !important;
+  color: var(--text-primary) !important;
 }
 
 /* Streaming cursor */
