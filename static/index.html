@@ -541,6 +541,16 @@ body {
 }
 .bubble-content li { margin: 0.2em 0; }
 
+.bubble-content a {
+  color: var(--accent);
+  text-decoration: none;
+  transition: opacity var(--transition);
+}
+.bubble-content a:hover {
+  opacity: 0.8;
+  text-decoration: underline;
+}
+
 .bubble-content blockquote {
   border-left: 3px solid var(--accent);
   margin: 0.6em 0;
@@ -633,20 +643,7 @@ body {
   color: var(--text-primary) !important;
 }
 
-/* Streaming cursor */
-.cursor {
-  display: inline-block;
-  width: 2px; height: 1em;
-  background: var(--accent);
-  margin-left: 2px;
-  vertical-align: text-bottom;
-  border-radius: 1px;
-  animation: blink 0.9s ease-in-out infinite;
-}
-@keyframes blink {
-  0%, 45% { opacity: 1; }
-  55%, 100% { opacity: 0; }
-}
+/* Streaming cursor - 已禁用 */
 
 /* Thinking indicator */
 .thinking-indicator {
@@ -1398,9 +1395,49 @@ function buildMessageEl(msg) {
   return div;
 }
 
+// 用户滚动状态追踪
+let userHasScrolled = false;
+let scrollTimeout = null;
+
 function scrollToBottom(smooth = true) {
+  // 如果用户手动滚动过，就不自动滚动
+  if (userHasScrolled) return;
+
   const c = document.getElementById('messages-container');
   c.scrollTo({top: c.scrollHeight, behavior: smooth ? 'smooth' : 'instant'});
+}
+
+// 检测用户是否手动滚动
+function setupScrollDetection() {
+  const container = document.getElementById('messages-container');
+
+  container.addEventListener('wheel', () => {
+    userHasScrolled = true;
+    clearTimeout(scrollTimeout);
+    scrollTimeout = setTimeout(() => {
+      // 检查是否滚动到底部，如果是则恢复自动滚动
+      const isAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 50;
+      if (isAtBottom) {
+        userHasScrolled = false;
+      }
+    }, 1000);
+  });
+
+  container.addEventListener('touchmove', () => {
+    userHasScrolled = true;
+    clearTimeout(scrollTimeout);
+    scrollTimeout = setTimeout(() => {
+      const isAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 50;
+      if (isAtBottom) {
+        userHasScrolled = false;
+      }
+    }, 1000);
+  });
+}
+
+// 重置滚动状态（发送新消息时）
+function resetScrollState() {
+  userHasScrolled = false;
 }
 
 // ============================================================
@@ -1462,6 +1499,9 @@ async function sendMessage(e, forcedContent = null) {
   autoResizeTextarea(input);
   updateSendButton(true);
 
+  // 重置滚动状态，允许自动滚动
+  resetScrollState();
+
   // Hide welcome
   const welcomeEl = document.getElementById('welcome-screen');
   if (welcomeEl) welcomeEl.style.display = 'none';
@@ -1516,10 +1556,6 @@ async function sendMessage(e, forcedContent = null) {
   function renderMarkdown() {
     renderTimer = null;
     bubbleContent.innerHTML = marked.parse(fullText);
-    // 在渲染结果末尾追加闪烁光标
-    const cur = document.createElement('span');
-    cur.className = 'cursor';
-    bubbleContent.appendChild(cur);
     scrollToBottom();
   }
 
@@ -2442,6 +2478,9 @@ function init() {
     if (list) list.classList.add('hidden-section');
     if (chevron) chevron.classList.add('collapsed');
   }
+
+  // 设置滚动检测
+  setupScrollDetection();
 
   // If there's a saved active chat, render it; otherwise show welcome
   if (state.activeChatId && state.chats.find(c => c.id === state.activeChatId)) {
