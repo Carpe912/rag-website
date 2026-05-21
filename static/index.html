@@ -482,11 +482,11 @@ body {
   flex: 1;
   min-width: 0;
   max-width: 100%;
+  display: flex;
+  flex-direction: column;
 }
 .message.user .bubble {
-  text-align: right;
-  display: flex;
-  justify-content: flex-end;
+  align-items: flex-end;
 }
 
 .bubble-content {
@@ -504,11 +504,13 @@ body {
 }
 
 .message.user .bubble-content {
-  background: transparent;
+  background: var(--bg-secondary);
   color: var(--text-primary);
-  border-radius: 0;
-  border: none;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
   text-align: right;
+  padding: 10px 14px;
+  display: inline-block;
 }
 
 .message.assistant .bubble-content {
@@ -682,7 +684,10 @@ body {
   transition: opacity var(--transition);
 }
 .message:hover .message-actions { opacity: 1; }
-.message.user .message-actions { justify-content: flex-end; }
+.message.user .message-actions {
+  justify-content: flex-end;
+  margin-right: 0;
+}
 
 .action-btn {
   display: flex; align-items: center; gap: 4px;
