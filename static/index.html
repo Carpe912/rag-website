@@ -469,7 +469,10 @@ body {
   to   { opacity: 1; transform: translateY(0); }
 }
 
-.message.user { flex-direction: row-reverse; }
+.message.user {
+  flex-direction: row-reverse;
+  justify-content: flex-start;
+}
 
 .avatar {
   display: none; /* 隐藏头像 */
@@ -480,14 +483,18 @@ body {
   min-width: 0;
   max-width: 100%;
 }
-.message.user .bubble { text-align: right; }
+.message.user .bubble {
+  text-align: right;
+  display: flex;
+  justify-content: flex-end;
+}
 
 .bubble-content {
   display: block;
   padding: 0;
   border-radius: 0;
   font-size: 14px;
-  line-height: 1.8;
+  line-height: 2.0;
   text-align: left;
   position: relative;
   max-width: 100%;
@@ -501,6 +508,7 @@ body {
   color: var(--text-primary);
   border-radius: 0;
   border: none;
+  text-align: right;
 }
 
 .message.assistant .bubble-content {
